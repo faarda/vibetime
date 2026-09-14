@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import { getSessions } from './db.js';
 import { refreshAndReap } from './rescore.js';
-import { readConfig, writeConfig, addTool, removeTool } from './config.js';
+import { readConfig, writeConfig, addTool, removeTool, setInstallOptOut } from './config.js';
 import { renderStatus, renderLog, renderLeaderboard } from './render.js';
 import { renderTerminalCard, writeHtmlCard } from './share.js';
 import { wrapTool } from './wrap.js';
@@ -44,6 +44,7 @@ program
   .command('init')
   .description('set up session tracking: shell wrapper + desktop hooks')
   .action(() => {
+    setInstallOptOut({ shell: false, desktop: false });
     initShellHooks();
     // Unconditional, like the shell functions: hooks are inert config until the
     // app exists, so someone who installs Claude Code, Codex, or Cursor months
@@ -57,6 +58,8 @@ program
   .command('uninstall')
   .description('remove shell hooks and desktop hooks')
   .action(() => {
+    // Recorded so the session-start repair doesn't put it all back tomorrow.
+    setInstallOptOut({ shell: true, desktop: true });
     removeShellHooks();
     removeClaudeHooks();
     removeCodexHooks();
@@ -71,6 +74,7 @@ hooksCmd
   .command('install')
   .description('track Claude Code, Codex, and Cursor Desktop sessions')
   .action(() => {
+    setInstallOptOut({ desktop: false });
     installClaudeHooks();
     installCodexHooks();
     installCursorHooks();
@@ -80,6 +84,7 @@ hooksCmd
   .command('uninstall')
   .description('stop tracking Claude Code, Codex, and Cursor Desktop sessions')
   .action(() => {
+    setInstallOptOut({ desktop: true });
     removeClaudeHooks();
     removeCodexHooks();
     removeCursorHooks();

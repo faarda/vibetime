@@ -126,6 +126,12 @@ export function stripCodexHooks(config: CodexHooksConfig): { config: CodexHooksC
   return { config, removed };
 }
 
+export function hasCodexHooks(path = defaultHooksPath()): boolean {
+  const events = readConfig(path)?.hooks;
+  if (!events) return false;
+  return Object.values(events).some((list) => Array.isArray(list) && list.some((g) => isVibeHook(g)));
+}
+
 function readConfig(path: string): CodexHooksConfig | null {
   if (!existsSync(path)) return {};
   try {
@@ -141,10 +147,11 @@ function writeConfig(path: string, config: CodexHooksConfig): void {
   writeFileSync(path, JSON.stringify(config, null, 2) + '\n');
 }
 
-export function installCodexHooks(path = defaultHooksPath()): void {
+export function installCodexHooks(path = defaultHooksPath(), silent = false): void {
+  const say = (msg: string) => { if (!silent) console.log(msg); };
   const current = readConfig(path);
   if (current === null) {
-    console.log(`\n  ${RED('✗')} vibe: ${path} is not valid JSON — fix it and re-run\n`);
+    say(`\n  ${RED('✗')} vibe: ${path} is not valid JSON — fix it and re-run\n`);
     return;
   }
 
@@ -152,16 +159,16 @@ export function installCodexHooks(path = defaultHooksPath()): void {
   writeConfig(path, config);
 
   if (added === 0 && updated === 0) {
-    console.log(`\n  ${PURPLE('◆')} codex desktop tracking already installed\n`);
+    say(`\n  ${PURPLE('◆')} codex desktop tracking already installed\n`);
     return;
   }
 
   const action = added > 0 ? 'installed' : 'updated';
-  console.log(`\n  ${PURPLE('◆')} codex desktop tracking ${action} in ${path}\n`);
-  console.log(`  Open a new Codex session to start tracking. If sessions don't appear in`);
-  console.log(`  vibe status, Codex is waiting for you to trust the hooks: Settings > Hooks`);
-  console.log(`  in the desktop app, or /hooks in the CLI.\n`);
-  if (existing > 0) console.log(`  (${existing} event${existing === 1 ? '' : 's'} were already wired up)\n`);
+  say(`\n  ${PURPLE('◆')} codex desktop tracking ${action} in ${path}\n`);
+  say(`  Open a new Codex session to start tracking. If sessions don't appear in`);
+  say(`  vibe status, Codex is waiting for you to trust the hooks: Settings > Hooks`);
+  say(`  in the desktop app, or /hooks in the CLI.\n`);
+  if (existing > 0) say(`  (${existing} event${existing === 1 ? '' : 's'} were already wired up)\n`);
 }
 
 export function removeCodexHooks(path = defaultHooksPath()): void {

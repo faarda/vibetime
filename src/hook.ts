@@ -5,6 +5,7 @@ import { refreshAndReap } from './rescore.js';
 import { readConfig } from './config.js';
 import { scoreSession, trackShipEvents } from './score.js';
 import { flushPendingSubmissions } from './submit.js';
+import { reconcileInstall } from './reconcile.js';
 
 // Claude Code, Codex, and Cursor deliver a JSON payload on stdin to every hook
 // command. We read only the fields below — never the transcript, prompts, or
@@ -144,6 +145,9 @@ export async function handleHook(event: string, raw: string, tool: HookTool = 'c
 }
 
 async function onSessionStart(sessionId: string, cwd: string, tool: HookTool): Promise<void> {
+  // Desktop-only users never start a wrapped session, so this is their repair
+  // path. Not on activity events: those fire on every tool call.
+  reconcileInstall();
   await refreshAndReap();
 
   // SessionStart can also fire when an existing conversation is resumed — key

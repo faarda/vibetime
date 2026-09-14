@@ -125,6 +125,12 @@ export function stripCursorHooks(config: CursorHooksConfig): { config: CursorHoo
   return { config, removed };
 }
 
+export function hasCursorHooks(path = defaultHooksPath()): boolean {
+  const events = readConfig(path)?.hooks;
+  if (!events) return false;
+  return Object.values(events).some((list) => Array.isArray(list) && list.some((h) => isVibeCursorHook(h)));
+}
+
 function readConfig(path: string): CursorHooksConfig | null {
   if (!existsSync(path)) return {};
   try {
@@ -140,10 +146,11 @@ function writeConfig(path: string, config: CursorHooksConfig): void {
   writeFileSync(path, JSON.stringify(config, null, 2) + '\n');
 }
 
-export function installCursorHooks(path = defaultHooksPath()): void {
+export function installCursorHooks(path = defaultHooksPath(), silent = false): void {
+  const say = (msg: string) => { if (!silent) console.log(msg); };
   const current = readConfig(path);
   if (current === null) {
-    console.log(`\n  ${RED('✗')} vibe: ${path} is not valid JSON — fix it and re-run\n`);
+    say(`\n  ${RED('✗')} vibe: ${path} is not valid JSON — fix it and re-run\n`);
     return;
   }
 
@@ -151,15 +158,15 @@ export function installCursorHooks(path = defaultHooksPath()): void {
   writeConfig(path, config);
 
   if (added === 0 && updated === 0) {
-    console.log(`\n  ${PURPLE('◆')} cursor desktop tracking already installed\n`);
+    say(`\n  ${PURPLE('◆')} cursor desktop tracking already installed\n`);
     return;
   }
 
   const action = added > 0 ? 'installed' : 'updated';
-  console.log(`\n  ${PURPLE('◆')} cursor desktop tracking ${action} in ${path}\n`);
-  console.log(`  vibe now records a session every time you use Cursor Agent.`);
-  console.log(`  hooks are hot-reloaded — open a new Cursor Agent session to start.\n`);
-  if (existing > 0) console.log(`  (${existing} event${existing === 1 ? '' : 's'} were already wired up)\n`);
+  say(`\n  ${PURPLE('◆')} cursor desktop tracking ${action} in ${path}\n`);
+  say(`  vibe now records a session every time you use Cursor Agent.`);
+  say(`  hooks are hot-reloaded — open a new Cursor Agent session to start.\n`);
+  if (existing > 0) say(`  (${existing} event${existing === 1 ? '' : 's'} were already wired up)\n`);
 }
 
 export function removeCursorHooks(path = defaultHooksPath()): void {

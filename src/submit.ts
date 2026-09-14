@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { getSessions, updateSession, type Session } from './db.js';
-import { readAuth, clearAuth, refreshAuth, jwtExpiresAtMs, type AuthRecord } from './auth.js';
+import { readAuth, markSignedOut, refreshAuth, jwtExpiresAtMs, type AuthRecord } from './auth.js';
 import { request, ApiError } from './api.js';
 
 // Renew ahead of expiry so submissions rarely meet a 401. Two days of slack on
@@ -67,7 +67,7 @@ export async function submitInProgress(session: Session, budgetMs = 1500): Promi
     if (!(e instanceof ApiError) || e.status !== 401) return;
     // No refresh token means a pre-0.7 login: drop it so a fresh login retries.
     if (!auth.refreshToken) {
-      clearAuth();
+      markSignedOut();
       return;
     }
     const renewed = await refreshAuth(auth, Math.min(budgetMs, 3000));
@@ -118,7 +118,7 @@ export async function flushPendingSubmissions(budgetMs: number): Promise<void> {
           }
           // no refresh token (pre-v0.7 login) or still 401 after renewing:
           // drop the token, leave sessions unsubmitted so a fresh login retries them
-          clearAuth();
+          markSignedOut();
           return;
         }
         if (e.status === 400) {
