@@ -16,6 +16,7 @@ export interface LeaderboardRow {
   handle: string;
   avatar_url: string | null;
   shipped_count: number;
+  ship_count: number;
   last_shipped_at: string;
   first_at: string;
 }
@@ -35,7 +36,11 @@ export interface LeaderboardEntry {
   rank: number;
   handle: string;
   avatarUrl: string | null;
+  // Days shipped in the window: the rank driver. Named shippedCount so CLIs
+  // released before this change keep rendering the number they expect.
   shippedCount: number;
+  // Total ships, the tiebreak between equal days.
+  shipCount: number;
   lastShippedAt: string;
   recentDays: HeatmapDay[];
 }
@@ -73,7 +78,8 @@ async function buildData(env: Env, window: Window): Promise<LeaderboardData> {
   const sinceDay = new Date(sinceMs).toISOString().slice(0, 10);
 
   const totalsRes = await env.DB.prepare(
-    `SELECT COUNT(DISTINCT user_github_id) AS dev_count, COUNT(*) AS session_count
+    `SELECT COUNT(DISTINCT user_github_id) AS dev_count,
+            COUNT(DISTINCT user_github_id || ':' || day) AS session_count
      FROM ship_events
      WHERE day >= ?`,
   ).bind(sinceDay).first<{ dev_count: number; session_count: number }>();
@@ -84,7 +90,8 @@ async function buildData(env: Env, window: Window): Promise<LeaderboardData> {
   // tiebreak still come from the underlying sessions.
   const topRes = await env.DB.prepare(
     `SELECT u.github_id, u.handle, u.avatar_url,
-            COUNT(*) AS shipped_count,
+            COUNT(DISTINCT e.day) AS shipped_count,
+            COUNT(*) AS ship_count,
             MAX(s.ended_at) AS last_shipped_at,
             MIN(s.started_at) AS first_at
      FROM ship_events e
@@ -92,7 +99,7 @@ async function buildData(env: Env, window: Window): Promise<LeaderboardData> {
      JOIN users u ON e.user_github_id = u.github_id
      WHERE e.day >= ?
      GROUP BY u.github_id
-     ORDER BY shipped_count DESC, first_at ASC
+     ORDER BY shipped_count DESC, ship_count DESC, first_at ASC
      LIMIT 100`,
   ).bind(sinceDay).all<LeaderboardRow>();
 
@@ -130,6 +137,7 @@ async function buildData(env: Env, window: Window): Promise<LeaderboardData> {
       handle: r.handle,
       avatarUrl: r.avatar_url,
       shippedCount: r.shipped_count,
+      shipCount: r.ship_count,
       lastShippedAt: r.last_shipped_at,
       recentDays: dayKeys.map((k) => ({ day: k, n: userDays.get(k) ?? 0 })),
     };
