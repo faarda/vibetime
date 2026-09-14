@@ -158,8 +158,7 @@ export function installCodexHooks(path = defaultHooksPath()): void {
 
   const action = added > 0 ? 'installed' : 'updated';
   console.log(`\n  ${PURPLE('◆')} codex desktop tracking ${action} in ${path}\n`);
-  console.log(`  In Codex, run /hooks, review the commands, and trust the configuration.`);
-  console.log(`  Then open a new Codex session to start tracking.\n`);
+  console.log(`  Open a new Codex session to start tracking — user-level hooks need no approval.\n`);
   if (existing > 0) console.log(`  (${existing} event${existing === 1 ? '' : 's'} were already wired up)\n`);
 }
 
