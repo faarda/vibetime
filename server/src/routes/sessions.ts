@@ -2,7 +2,7 @@ import type { Env } from '../env.js';
 import { error, json } from '../http.js';
 import { requireAuth } from '../auth-middleware.js';
 import { checkAndRecord } from '../ratelimit.js';
-import { scoreSession } from '../score.js';
+import { scoreSession, clampBaseline, earnsEvents, type Stats } from '../score.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_TIERS = new Set(['shipped', 'progressed', 'tinkering', 'exploring', 'idle', 'interrupted']);
@@ -103,18 +103,46 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
     filesTouched: parsed.filesTouched,
   });
 
-  // Prior state drives both the ownership check and the legacy event gate.
+  // Prior state drives the ownership check and the event baseline.
   const prior = await env.DB.prepare(
-    `SELECT user_github_id AS uid, commits AS priorCommits FROM sessions WHERE id = ?`,
-  ).bind(parsed.id).first<{ uid: number; priorCommits: number }>();
+    `SELECT user_github_id AS uid,
+            event_baseline_commits       AS baseCommits,
+            event_baseline_lines_added   AS baseLinesAdded,
+            event_baseline_lines_removed AS baseLinesRemoved,
+            event_baseline_files         AS baseFiles
+       FROM sessions WHERE id = ?`,
+  ).bind(parsed.id).first<{
+    uid: number;
+    baseCommits: number | null;
+    baseLinesAdded: number | null;
+    baseLinesRemoved: number | null;
+    baseFiles: number | null;
+  }>();
   if (prior && prior.uid !== auth.sub) return error(409, 'session id belongs to another user');
+
+  const stats: Stats = {
+    commits: parsed.commits,
+    linesAdded: parsed.linesAdded,
+    linesRemoved: parsed.linesRemoved,
+    filesTouched: parsed.filesTouched,
+  };
+  // A session nobody has credited yet starts from zero, like a fresh CLI
+  // baseline, so its first real shipping day still lands.
+  const baseline: Stats = clampBaseline({
+    commits: prior?.baseCommits ?? 0,
+    linesAdded: prior?.baseLinesAdded ?? 0,
+    linesRemoved: prior?.baseLinesRemoved ?? 0,
+    filesTouched: prior?.baseFiles ?? 0,
+  }, stats);
 
   const submittedAt = new Date().toISOString();
   await env.DB.prepare(
     `INSERT INTO sessions (id, user_github_id, tool, project_hash, started_at, ended_at,
                            duration_seconds, commits, lines_added, lines_removed,
-                           files_touched, momentum, submitted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           files_touched, momentum, submitted_at,
+                           event_baseline_commits, event_baseline_lines_added,
+                           event_baseline_lines_removed, event_baseline_files)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        tool = excluded.tool,
        project_hash = excluded.project_hash,
@@ -125,44 +153,77 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
        lines_added = excluded.lines_added,
        lines_removed = excluded.lines_removed,
        files_touched = excluded.files_touched,
-       momentum = excluded.momentum
+       momentum = excluded.momentum,
+       event_baseline_commits = excluded.event_baseline_commits,
+       event_baseline_lines_added = excluded.event_baseline_lines_added,
+       event_baseline_lines_removed = excluded.event_baseline_lines_removed,
+       event_baseline_files = excluded.event_baseline_files
      WHERE sessions.user_github_id = excluded.user_github_id`,
   ).bind(
     parsed.id, auth.sub, parsed.tool, parsed.projectHash, parsed.startedAt, parsed.endedAt,
     parsed.durationSeconds, parsed.commits, parsed.linesAdded, parsed.linesRemoved,
     parsed.filesTouched, momentum, submittedAt,
+    baseline.commits, baseline.linesAdded, baseline.linesRemoved, baseline.filesTouched,
   ).run();
 
   // One row per (session, day); past days are announced history and immutable.
   //
-  // Clients that send shipEvents delta-gate each day themselves, and their
-  // submitted set replaces the session's rows for today and later only.
+  // Where the day list comes from still depends on the client version, but the
+  // test it has to pass no longer does. Both paths go through earnsEvents, so
+  // a day counts only when the work since the last credited event would score
+  // 'shipped' on its own.
   //
-  // Pre-0.8 clients assert nothing about events, so their submissions never
-  // delete rows; a single end-day event is derived from momentum, gated on the
-  // commit count having GROWN since the last stored submission. Without that
-  // gate, any long-lived session that ever shipped would mint a free event
-  // every day it merely revived (42 phantom events in the first hour of
-  // 2026-09-07).
+  // This used to be two rules. A v0.8+ client's list was taken verbatim, and a
+  // pre-0.8 client's end day was derived from cumulative momentum plus "did
+  // commits grow" — one commit, no meaningfulness test, every day, forever,
+  // for any long-lived session that had ever shipped. The two drifted because
+  // nothing compared them; test/score-parity.test.mjs now does.
   const todayDay = new Date().toISOString().slice(0, 10);
-  let eventDays: string[];
+  let claimedDays: string[];
   if (parsed.shipEvents) {
-    eventDays = [...new Set(parsed.shipEvents)].sort();
+    claimedDays = [...new Set(parsed.shipEvents)].sort();
+    // Reconciliation is unchanged and still bounded to today and later, so
+    // announced history stays append-only.
     await env.DB.prepare(
-      `DELETE FROM ship_events WHERE session_id = ? AND day >= ?${eventDays.length ? ` AND day NOT IN (${eventDays.map(() => '?').join(',')})` : ''}`,
-    ).bind(parsed.id, todayDay, ...eventDays).run();
+      `DELETE FROM ship_events WHERE session_id = ? AND day >= ?${claimedDays.length ? ` AND day NOT IN (${claimedDays.map(() => '?').join(',')})` : ''}`,
+    ).bind(parsed.id, todayDay, ...claimedDays).run();
   } else {
-    const commitsGrew = !prior || parsed.commits > (prior.priorCommits ?? 0);
-    eventDays = momentum === 'shipped' && commitsGrew ? [parsed.endedAt.slice(0, 10)] : [];
+    claimedDays = momentum === 'shipped' ? [parsed.endedAt.slice(0, 10)] : [];
   }
-  for (const day of eventDays) {
-    // Conditional insert in one statement so concurrent submissions can't
-    // race past the per-day cap.
+
+  // Days this session already holds are paid for; re-claiming one costs
+  // nothing and must not consume the delta a new day would need.
+  const credited = claimedDays.length
+    ? await env.DB.prepare(
+        `SELECT day FROM ship_events WHERE session_id = ? AND day IN (${claimedDays.map(() => '?').join(',')})`,
+      ).bind(parsed.id, ...claimedDays).all<{ day: string }>()
+    : null;
+  const already = new Set((credited?.results ?? []).map((r) => r.day));
+  const newDays = claimedDays.filter((d) => !already.has(d));
+
+  let landed = 0;
+  if (earnsEvents(baseline, stats, newDays.length)) {
+    for (const day of newDays) {
+      // Conditional insert in one statement so concurrent submissions can't
+      // race past the per-day cap.
+      const res = await env.DB.prepare(
+        `INSERT OR IGNORE INTO ship_events (session_id, user_github_id, day)
+         SELECT ?1, ?2, ?3
+         WHERE (SELECT COUNT(*) FROM ship_events WHERE user_github_id = ?2 AND day = ?3 AND session_id != ?1) < ${DAILY_SHIPPED_CAP}`,
+      ).bind(parsed.id, auth.sub, day).run();
+      if (res.meta.changes > 0) landed++;
+    }
+  }
+
+  // Spend the delta only on work that was actually credited. A day the cap
+  // swallowed leaves the baseline where it was, so the work rolls forward
+  // instead of evaporating.
+  if (landed > 0) {
     await env.DB.prepare(
-      `INSERT OR IGNORE INTO ship_events (session_id, user_github_id, day)
-       SELECT ?1, ?2, ?3
-       WHERE (SELECT COUNT(*) FROM ship_events WHERE user_github_id = ?2 AND day = ?3 AND session_id != ?1) < ${DAILY_SHIPPED_CAP}`,
-    ).bind(parsed.id, auth.sub, day).run();
+      `UPDATE sessions SET event_baseline_commits = ?, event_baseline_lines_added = ?,
+                           event_baseline_lines_removed = ?, event_baseline_files = ?
+        WHERE id = ? AND user_github_id = ?`,
+    ).bind(stats.commits, stats.linesAdded, stats.linesRemoved, stats.filesTouched, parsed.id, auth.sub).run();
   }
 
   await env.DB.prepare(`UPDATE users SET last_seen_at = ? WHERE github_id = ?`).bind(submittedAt, auth.sub).run();
