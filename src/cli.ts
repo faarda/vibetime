@@ -187,7 +187,7 @@ program
 
 program
   .command('leaderboard')
-  .description('shipped sessions, last 7 days')
+  .description('ship days, this week')
   .action(async () => {
     await flushPendingSubmissions(1500).catch(() => {});
     try {
