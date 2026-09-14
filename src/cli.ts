@@ -8,6 +8,7 @@ import { renderStatus, renderLog, renderLeaderboard } from './render.js';
 import { renderTerminalCard, writeHtmlCard } from './share.js';
 import { wrapTool } from './wrap.js';
 import { initShellHooks, removeShellHooks } from './init.js';
+import { isInstalled } from './reconcile.js';
 import { installClaudeHooks, removeClaudeHooks } from './claude-hooks.js';
 import { installCodexHooks, removeCodexHooks } from './codex-hooks.js';
 import { installCursorHooks, removeCursorHooks } from './cursor-hooks.js';
@@ -40,19 +41,56 @@ program
   .version(version)
   .enablePositionalOptions();
 
+function runInit(): void {
+  setInstallOptOut({ shell: false, desktop: false });
+  initShellHooks();
+  // Unconditional, like the shell functions: hooks are inert config until the
+  // app exists, so someone who installs Claude Code, Codex, or Cursor months
+  // from now is already tracked without remembering to re-run init.
+  installClaudeHooks();
+  installCodexHooks();
+  installCursorHooks();
+}
+
+async function showStatus(): Promise<void> {
+  await refreshAndReap();
+  const sessions = getSessions();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+
+  const todaySessions = sessions.filter((s) => {
+    const d = new Date(s.startedAt);
+    if (d >= today && d < tomorrow) return true;
+    // active sessions: only include if last activity was today
+    if (s.exitCode === -1) {
+      const lastActivity = new Date(s.lastActivityAt || s.startedAt);
+      return lastActivity >= today && lastActivity < tomorrow;
+    }
+    return false;
+  });
+
+  console.log(renderStatus(todaySessions, needsLogin()));
+}
+
+// Bare `vibe` is the first thing anyone types after installing, and npm hides
+// postinstall output entirely, so this is the earliest moment we can actually
+// reach a new user. Set them up rather than printing a help dump they have to
+// act on; once set up, show them today.
+program
+  .action(async () => {
+    if (isInstalled()) {
+      await showStatus();
+      return;
+    }
+    runInit();
+  });
+
 program
   .command('init')
   .description('set up session tracking: shell wrapper + desktop hooks')
-  .action(() => {
-    setInstallOptOut({ shell: false, desktop: false });
-    initShellHooks();
-    // Unconditional, like the shell functions: hooks are inert config until the
-    // app exists, so someone who installs Claude Code, Codex, or Cursor months
-    // from now is already tracked without remembering to re-run init.
-    installClaudeHooks();
-    installCodexHooks();
-    installCursorHooks();
-  });
+  .action(runInit);
 
 program
   .command('uninstall')
@@ -93,27 +131,7 @@ hooksCmd
 program
   .command('status')
   .description("today's sessions")
-  .action(async () => {
-    await refreshAndReap();
-    const sessions = getSessions();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-
-    const todaySessions = sessions.filter((s) => {
-      const d = new Date(s.startedAt);
-      if (d >= today && d < tomorrow) return true;
-      // active sessions: only include if last activity was today
-      if (s.exitCode === -1) {
-        const lastActivity = new Date(s.lastActivityAt || s.startedAt);
-        return lastActivity >= today && lastActivity < tomorrow;
-      }
-      return false;
-    });
-
-    console.log(renderStatus(todaySessions, needsLogin()));
-  });
+  .action(showStatus);
 
 program
   .command('log')
