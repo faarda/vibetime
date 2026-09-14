@@ -5,7 +5,8 @@ import { baselineRepos, describeRepos, getReposDiffStats, getReposFingerprint } 
 import { refreshAndReap } from './rescore.js';
 import { readConfig } from './config.js';
 import { scoreSession, trackShipEvents, type ShipEventState } from './score.js';
-import { renderEndcard } from './render.js';
+import { renderEndcard, renderSignedOutNotice } from './render.js';
+import { needsLogin } from './auth.js';
 import { flushPendingSubmissions, submitInProgress } from './submit.js';
 import { getRecommendedVersion } from './api.js';
 import { TUNABLES, refreshTunables } from './remote-config.js';
@@ -92,6 +93,7 @@ export async function wrapTool(tool: string, args: string[]): Promise<void> {
   let prevLinesRemoved = initial.linesRemoved;
   let prevTreeState = hasGit ? getReposFingerprint(repos) : '';
   let lastInProgressSubmitAt = 0;
+  let lastSubmitSignature = '';
   const poll = setInterval(async () => {
     try {
       const now = Date.now();
@@ -122,9 +124,15 @@ export async function wrapTool(tool: string, args: string[]): Promise<void> {
       await updateSession(sessionId, snap);
 
       if (snap.momentum === 'shipped') {
-        const sinceLast = Date.now() - lastInProgressSubmitAt;
-        if (lastInProgressSubmitAt === 0 || sinceLast >= IN_PROGRESS_SUBMIT_INTERVAL_MS) {
+        // Only resubmit when the payload actually changed. An idle open session
+        // otherwise reposts an identical row every 5 minutes forever, and a
+        // developer running a dozen sessions at once burned the server's rate
+        // guard on nothing, losing the submissions that did matter.
+        const signature = `${snap.commits}:${snap.linesAdded}:${snap.linesRemoved}:${snap.filesTouched}:${(snap.shipEvents ?? []).length}`;
+        const due = lastInProgressSubmitAt === 0 || Date.now() - lastInProgressSubmitAt >= IN_PROGRESS_SUBMIT_INTERVAL_MS;
+        if (due && signature !== lastSubmitSignature) {
           lastInProgressSubmitAt = Date.now();
+          lastSubmitSignature = signature;
           submitInProgress({ ...session, ...snap }).catch(() => {});
         }
       }
@@ -157,6 +165,8 @@ export async function wrapTool(tool: string, args: string[]): Promise<void> {
     if (showEndcard) console.log(renderEndcard({ ...session, ...final }));
     await flushPendingSubmissions(1500).catch(() => {});
     if (showEndcard) {
+      // After the flush, so a renewal that just succeeded doesn't nag.
+      if (needsLogin()) console.log(renderSignedOutNotice());
       const recommended = getRecommendedVersion();
       if (recommended) {
         console.log(`  ${PURPLE('◆')} vibe ${recommended} available · run: npm i -g vibetime-cli\n`);

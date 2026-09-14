@@ -78,7 +78,7 @@ export function renderEndcard(session: Session): string {
   ].join('\n');
 }
 
-export function renderStatus(sessions: Session[]): string {
+export function renderStatus(sessions: Session[], signedOut = false): string {
   const now = new Date();
   const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
@@ -116,7 +116,15 @@ export function renderStatus(sessions: Session[]): string {
     `  ${DIM('─'.repeat(37))}`,
     summary,
     '',
+    ...(signedOut ? [renderSignedOutNotice()] : []),
   ].join('\n');
+}
+
+// Shown after the endcard and under `vibe status` when the server rejected the
+// saved login. Tracking keeps working locally, only the leaderboard stops, so
+// this states the consequence and the one-command fix without crying wolf.
+export function renderSignedOutNotice(): string {
+  return `  ${PURPLE('◆')} signed out · run ${PURPLE('vibe login')} so your ships keep counting\n`;
 }
 
 export function renderLoginPrompt(userCode: string, verificationUri: string): string {
