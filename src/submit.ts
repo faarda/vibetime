@@ -35,37 +35,54 @@ function buildPayload(s: Session): Record<string, unknown> {
   };
 }
 
-export async function submitInProgress(session: Session, budgetMs = 1500): Promise<void> {
+function postSession(session: Session, auth: AuthRecord, timeoutMs: number): Promise<unknown> {
+  return request<{ ok: true; submittedAt: string }>('/sessions', {
+    method: 'POST',
+    body: buildPayload(session),
+    headers: { authorization: `Bearer ${auth.jwt}` },
+    timeoutMs,
+  });
+}
+
+// Auth for a submission, renewed when the access token is near or past expiry.
+// Both submit paths go through this. In-progress submits are the ONLY thing a
+// long-lived open session ever calls, so without renewal here a session that
+// outlives its access token stops reporting and never recovers: the flush path
+// skips open sessions, so nothing else would ever renew for that user.
+async function currentAuth(budgetMs: number): Promise<AuthRecord | null> {
   const auth = readAuth();
-  if (!auth) return;
+  if (!auth?.refreshToken) return auth;
+  const exp = jwtExpiresAtMs(auth.jwt);
+  if (exp !== null && exp - Date.now() >= RENEW_BEFORE_MS) return auth;
+  return refreshAuth(auth, Math.min(budgetMs, 3000));
+}
+
+export async function submitInProgress(session: Session, budgetMs = 1500): Promise<void> {
   if (session.durationSeconds < 60) return;
+  const auth = await currentAuth(budgetMs);
+  if (!auth) return;
   try {
-    await request<{ ok: true; submittedAt: string }>('/sessions', {
-      method: 'POST',
-      body: buildPayload(session),
-      headers: { authorization: `Bearer ${auth.jwt}` },
-      timeoutMs: budgetMs,
-    });
+    await postSession(session, auth, budgetMs);
   } catch (e) {
-    // A stale access token gets renewed by the next flush; only a legacy
-    // record with no refresh token is dropped here, so a fresh login retries.
-    if (e instanceof ApiError && e.status === 401 && !auth.refreshToken) clearAuth();
+    if (!(e instanceof ApiError) || e.status !== 401) return;
+    // No refresh token means a pre-0.7 login: drop it so a fresh login retries.
+    if (!auth.refreshToken) {
+      clearAuth();
+      return;
+    }
+    const renewed = await refreshAuth(auth, Math.min(budgetMs, 3000));
+    if (!renewed || renewed.jwt === auth.jwt) return;
+    try { await postSession(session, renewed, budgetMs); } catch {}
   }
 }
 
 export async function flushPendingSubmissions(budgetMs: number): Promise<void> {
-  let auth: AuthRecord | null = readAuth();
-  if (!auth) return;
-
   const deadline = Date.now() + budgetMs;
 
-  // Proactive renewal when the access token is close to expiry. A failed
-  // renewal falls through with the current jwt, which may still be valid.
-  const exp = jwtExpiresAtMs(auth.jwt);
-  if (auth.refreshToken && exp !== null && exp - Date.now() < RENEW_BEFORE_MS) {
-    auth = await refreshAuth(auth, Math.min(budgetMs, 3000));
-    if (!auth) return; // refresh rejected: local auth already cleared
-  }
+  // Renewed here when near expiry; a failed renewal falls through with the
+  // current jwt, which may still be valid.
+  let auth: AuthRecord | null = await currentAuth(budgetMs);
+  if (!auth) return;
 
   const pending = getSessions()
     .filter((s) => !s.submittedAt && s.exitCode !== -1 && s.durationSeconds >= 60)
