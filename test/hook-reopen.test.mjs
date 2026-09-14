@@ -170,3 +170,46 @@ test('Codex hook sessions are labelled separately from Claude sessions', async (
   assert.equal(find(codexId).tool, 'codex');
   assert.equal(find(claudeId).tool, 'claude');
 });
+
+test('Cursor hook sessions are labelled separately from Claude sessions', async (t) => {
+  freshDb();
+  const repo = initRepo(scratch(t), 'repo');
+  const cursorId = randomUUID();
+  const claudeId = randomUUID();
+
+  await hook('session-start', cursorId, repo, 'cursor');
+  await hook('session-start', claudeId, repo);
+
+  assert.equal(find(cursorId).tool, 'cursor');
+  assert.equal(find(claudeId).tool, 'claude');
+});
+
+test('Cursor payloads without cwd still open a session from workspace_roots', async (t) => {
+  freshDb();
+  const repo = initRepo(scratch(t), 'repo');
+  const id = randomUUID();
+
+  await handleHook('session-start', JSON.stringify({
+    conversation_id: id,
+    workspace_roots: [repo],
+  }), 'cursor');
+
+  const session = find(id);
+  assert.ok(session);
+  assert.equal(session.tool, 'cursor');
+  assert.equal(session.exitCode, -1);
+});
+
+test('imported Claude hooks running inside Cursor are tagged as cursor', async (t) => {
+  freshDb();
+  const repo = initRepo(scratch(t), 'repo');
+  const id = randomUUID();
+
+  await handleHook('session-start', JSON.stringify({
+    session_id: id,
+    cwd: repo,
+    cursor_version: '3.8.23',
+  }), 'claude');
+
+  assert.equal(find(id).tool, 'cursor');
+});

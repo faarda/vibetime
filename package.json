@@ -19,7 +19,8 @@
     "claude",
     "codex",
     "gemini",
-    "aster"
+    "aster",
+    "cursor"
   ],
   "author": "iamnotstatic",
   "license": "MIT",
