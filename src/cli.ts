@@ -12,7 +12,7 @@ import { installClaudeHooks, removeClaudeHooks } from './claude-hooks.js';
 import { installCodexHooks, removeCodexHooks } from './codex-hooks.js';
 import { installCursorHooks, removeCursorHooks } from './cursor-hooks.js';
 import { handleHook, parseHookTool } from './hook.js';
-import { login, logout, readAuth } from './auth.js';
+import { login, logout, readAuth, needsLogin } from './auth.js';
 import { fetchLeaderboard } from './leaderboard.js';
 import { flushPendingSubmissions } from './submit.js';
 import { WEB_BASE } from './api.js';
@@ -107,7 +107,7 @@ program
       return false;
     });
 
-    console.log(renderStatus(todaySessions));
+    console.log(renderStatus(todaySessions, needsLogin()));
   });
 
 program

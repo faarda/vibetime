@@ -19,10 +19,39 @@ export interface AuthRecord {
   // Absent on logins from pre-v0.7 CLIs; those carry a long-lived jwt instead
   // and fall back to a fresh login when it eventually expires.
   refreshToken?: string;
+  // Set when the server rejected this credential for good. The record stays on
+  // disk, minus the secrets, so `vibe status` and the endcard can say you are
+  // signed out. Deleting it made a broken login indistinguishable from never
+  // having logged in, which is how a week of submissions failed in silence.
+  signedOutAt?: string;
 }
 
-export function clearAuth(): void {
-  try { unlinkSync(AUTH_PATH); } catch {}
+function readRecord(): AuthRecord | null {
+  if (!existsSync(AUTH_PATH)) return null;
+  try {
+    return JSON.parse(readFileSync(AUTH_PATH, 'utf-8')) as AuthRecord;
+  } catch {
+    return null;
+  }
+}
+
+// True when the user was signed in and the server since rejected them: the one
+// state worth interrupting the endcard for, because their work stopped counting
+// and only they can fix it.
+export function needsLogin(): boolean {
+  return !!readRecord()?.signedOutAt;
+}
+
+export function markSignedOut(): void {
+  const record = readRecord();
+  if (!record || record.signedOutAt) return;
+  writeAuth({
+    jwt: '',
+    handle: record.handle,
+    avatarUrl: record.avatarUrl,
+    issuedAt: record.issuedAt,
+    signedOutAt: new Date().toISOString(),
+  });
 }
 
 interface DeviceCodeResponse {
@@ -62,7 +91,8 @@ export function jwtExpiresAtMs(jwt: string): number | null {
 // Swap the refresh token for a fresh access jwt. Returns the record to use:
 // the renewed one on success, the existing one when the server is unreachable
 // (the old jwt may still be valid), or null when the server rejects the
-// refresh token — auth is dead, and it's cleared so a fresh login can retry.
+// refresh token: auth is dead, and the record is marked signed out so the next
+// endcard can say so.
 export async function refreshAuth(auth: AuthRecord, timeoutMs = 3000): Promise<AuthRecord | null> {
   if (!auth.refreshToken) return auth;
   try {
@@ -82,20 +112,18 @@ export async function refreshAuth(auth: AuthRecord, timeoutMs = 3000): Promise<A
     return record;
   } catch (e) {
     if (e instanceof ApiError && (e.status === 401 || e.status === 400)) {
-      clearAuth();
+      markSignedOut();
       return null;
     }
     return auth;
   }
 }
 
+// Usable credentials only: a signed-out record reads as no auth, so every
+// submit path skips it exactly as it did when the file was deleted.
 export function readAuth(): AuthRecord | null {
-  if (!existsSync(AUTH_PATH)) return null;
-  try {
-    return JSON.parse(readFileSync(AUTH_PATH, 'utf-8')) as AuthRecord;
-  } catch {
-    return null;
-  }
+  const record = readRecord();
+  return record && !record.signedOutAt ? record : null;
 }
 
 function writeAuth(record: AuthRecord): void {
@@ -193,7 +221,7 @@ export async function logout(): Promise<void> {
   }
   // Best-effort server-side revocation so the refresh token can't be reused;
   // local logout succeeds regardless.
-  const auth = readAuth();
+  const auth = readRecord();
   if (auth?.refreshToken) {
     await request('/auth/logout', {
       method: 'POST',

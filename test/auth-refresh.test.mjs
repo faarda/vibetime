@@ -36,7 +36,7 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 process.env.VIBE_API = `http://127.0.0.1:${server.address().port}`;
 after(() => server.close());
 
-const { refreshAuth, jwtExpiresAtMs, readAuth, AUTH_PATH } = await import('../dist/auth.js');
+const { refreshAuth, jwtExpiresAtMs, readAuth, needsLogin, AUTH_PATH } = await import('../dist/auth.js');
 const { addSession, getSessions } = await import('../dist/db.js');
 const { flushPendingSubmissions, submitInProgress } = await import('../dist/submit.js');
 
@@ -82,14 +82,14 @@ test('refreshAuth swaps the jwt and keeps the refresh token', async () => {
   assert.equal(readAuth().jwt, newJwt);
 });
 
-test('a rejected refresh clears local auth', async () => {
+test('a rejected refresh stops the credentials being used', async () => {
   const auth = baseAuth();
   writeAuthFile(auth);
   handlers['/auth/refresh'] = () => [401, { error: 'refresh token invalid' }];
 
   const renewed = await refreshAuth(auth);
   assert.equal(renewed, null);
-  assert.equal(existsSync(AUTH_PATH), false);
+  assert.equal(readAuth(), null);
 });
 
 test('a legacy record without a refresh token never touches the network', async () => {
@@ -183,4 +183,31 @@ test('in-progress submits retry once after a 401', async () => {
 
   assert.equal(posts, 2, 'should retry the submission with the renewed token');
   assert.equal(readAuth().jwt, newJwt);
+});
+
+// The incident's real damage: a rejected credential was deleted, so a broken
+// login looked exactly like never having logged in and nothing could say so.
+test('a rejected refresh marks the record signed out instead of deleting it', async () => {
+  writeAuthFile(baseAuth());
+  handlers['/auth/refresh'] = () => [401, { error: 'refresh token invalid' }];
+
+  const renewed = await refreshAuth(baseAuth());
+  assert.equal(renewed, null);
+  assert.ok(existsSync(AUTH_PATH), 'the record must survive so status can explain');
+  assert.equal(readAuth(), null, 'but it must not read as usable credentials');
+  assert.equal(needsLogin(), true, 'and the user must be told to log in again');
+
+  const raw = JSON.parse(readFileSync(AUTH_PATH, 'utf8'));
+  assert.equal(raw.handle, 't', 'keeps who it was for diagnosis');
+  assert.equal(raw.jwt, '', 'drops the dead secrets');
+  assert.equal(raw.refreshToken, undefined);
+});
+
+test('a fresh login clears the signed-out state', async () => {
+  writeAuthFile({ jwt: '', handle: 't', avatarUrl: null, issuedAt: new Date().toISOString(), signedOutAt: new Date().toISOString() });
+  assert.equal(needsLogin(), true);
+
+  writeAuthFile(baseAuth()); // what login() writes
+  assert.equal(needsLogin(), false);
+  assert.ok(readAuth());
 });
