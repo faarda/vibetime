@@ -21,13 +21,13 @@ npm install -g vibetime-cli
 ## Setup
 
 ```
-vibe init
+vibe
 source ~/.zshrc   # or ~/.bashrc / ~/.config/fish/config.fish
 ```
 
-One command sets up everything: shell hooks that wrap `claude`, `codex`, `gemini`, and `aster` in the terminal, plus desktop session hooks for the Claude Code, Codex, and Cursor apps (see [Desktop apps](#desktop-apps)). The tools work exactly the same — Vibetime tracks your git state while you code and prints the endcard when you're done.
+Running `vibe` with nothing after it sets up everything: shell hooks that wrap `claude`, `codex`, `gemini`, and `aster` in the terminal, plus desktop session hooks for the Claude Code, Codex, and Cursor apps (see [Desktop apps](#desktop-apps)). The tools work exactly the same — Vibetime tracks your git state while you code and prints the endcard when you're done.
 
-Fish, Bash, and Zsh are detected automatically, and `vibe init` writes the matching syntax to the shell's rc file.
+Fish, Bash, and Zsh are detected automatically, and the matching syntax is written to that shell's rc file. `vibe init` does the same thing explicitly, and re-running it is always safe.
 
 ## What you get
 

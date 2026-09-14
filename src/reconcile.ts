@@ -36,3 +36,13 @@ export function reconcileInstall(): void {
     // was unreadable or a home directory was read-only.
   }
 }
+
+// Has the user set vibetime up at all? Used by bare `vibe` to decide between
+// setting up and showing today.
+export function isInstalled(): boolean {
+  try {
+    return hasShellHooks() || hasClaudeHooks() || hasCodexHooks() || hasCursorHooks();
+  } catch {
+    return false;
+  }
+}
