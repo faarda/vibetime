@@ -73,7 +73,7 @@ vibe login</pre>
         return `<tr>
           <td class="${rankClass}">${e.rank}</td>
           <td class="who"><a href="https://github.com/${handle}" rel="nofollow noopener">${avatar}<span>${handle}</span></a></td>
-          <td class="shipped">${e.shippedCount}</td>
+          <td class="shipped">${e.shippedCount}<span class="ships">${e.shipCount} ship${e.shipCount === 1 ? '' : 's'}</span></td>
           <td class="activity"><span class="heatmap">${heatmapCells(e.recentDays)}</span></td>
           <td class="last">${escapeHtml(relativeTime(e.lastShippedAt, updatedAt))}</td>
         </tr>`;
@@ -109,7 +109,8 @@ vibe login</pre>
   tbody tr:hover td { background: #111; }
   td.rank { width: 44px; color: #666; text-align: right; font-variant-numeric: tabular-nums; }
   td.rank-top { color: #a78bfa; font-weight: 600; }
-  td.shipped { width: 80px; text-align: right; color: #a78bfa; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 16px; }
+  td.shipped { width: 86px; text-align: right; color: #a78bfa; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 16px; }
+  td.shipped .ships { display: block; color: #555; font-size: 10px; font-weight: 400; letter-spacing: 0.2px; margin-top: 2px; }
   td.activity { width: 110px; }
   td.last { width: 100px; text-align: right; color: #666; font-size: 12px; font-variant-numeric: tabular-nums; }
   td.who a { color: #e5e5e5; text-decoration: none; display: flex; align-items: center; gap: 10px; }
@@ -135,7 +136,7 @@ vibe login</pre>
     body { padding: 20px 12px; }
     tbody td, thead th { padding: 12px 4px; }
     td.last, thead th.col-last { display: none; }
-    td.shipped, thead th.col-shipped { width: 60px; }
+    td.shipped, thead th.col-shipped { width: 66px; }
     td.shipped { font-size: 14px; }
     td.activity, thead th.col-activity { width: 80px; }
     .heatmap { gap: 2px; }
