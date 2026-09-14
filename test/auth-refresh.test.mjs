@@ -38,7 +38,7 @@ after(() => server.close());
 
 const { refreshAuth, jwtExpiresAtMs, readAuth, AUTH_PATH } = await import('../dist/auth.js');
 const { addSession, getSessions } = await import('../dist/db.js');
-const { flushPendingSubmissions } = await import('../dist/submit.js');
+const { flushPendingSubmissions, submitInProgress } = await import('../dist/submit.js');
 
 function fakeJwt(expSecondsFromNow) {
   const b64u = (s) => Buffer.from(s).toString('base64url');
@@ -137,5 +137,50 @@ test('flush renews proactively when the jwt is close to expiry', async () => {
   handlers['/auth/refresh'] = () => [200, { jwt: newJwt, handle: 't', avatarUrl: null }];
 
   await flushPendingSubmissions(10_000);
+  assert.equal(readAuth().jwt, newJwt);
+});
+
+// The regression behind the silent-logout incident: an open session only ever
+// calls submitInProgress, so if that path can't renew, a session outliving its
+// access token stops reporting forever and the user never finds out.
+test('in-progress submits renew an expired access token', async () => {
+  writeAuthFile(baseAuth({ jwt: fakeJwt(-3600) })); // expired an hour ago
+  const newJwt = fakeJwt(7 * 24 * 3600);
+  handlers['/auth/refresh'] = () => [200, { jwt: newJwt, handle: 't', avatarUrl: null }];
+
+  handlers['/sessions'] = () => [200, { ok: true, submittedAt: new Date().toISOString() }];
+  calls.length = 0;
+
+  await submitInProgress({
+    id: randomUUID(), tool: 'claude', project: 'repo', branch: 'main',
+    startedAt: new Date(Date.now() - 600_000).toISOString(),
+    endedAt: new Date().toISOString(),
+    durationSeconds: 300, commits: 1, linesAdded: 100, linesRemoved: 0, filesTouched: 2,
+    momentum: 'shipped', exitCode: -1, lastActivityAt: new Date().toISOString(),
+  });
+
+  assert.equal(readAuth().jwt, newJwt, 'token should be renewed, not left expired');
+  assert.ok(calls.includes('/sessions'), 'the session should still be submitted');
+});
+
+test('in-progress submits retry once after a 401', async () => {
+  writeAuthFile(baseAuth()); // not near expiry, so no proactive renewal
+  const newJwt = fakeJwt(7 * 24 * 3600);
+  handlers['/auth/refresh'] = () => [200, { jwt: newJwt, handle: 't', avatarUrl: null }];
+  let posts = 0;
+  handlers['/sessions'] = () => {
+    posts++;
+    return posts === 1 ? [401, { error: 'token expired' }] : [200, { ok: true, submittedAt: new Date().toISOString() }];
+  };
+
+  await submitInProgress({
+    id: randomUUID(), tool: 'claude', project: 'repo', branch: 'main',
+    startedAt: new Date(Date.now() - 600_000).toISOString(),
+    endedAt: new Date().toISOString(),
+    durationSeconds: 300, commits: 1, linesAdded: 100, linesRemoved: 0, filesTouched: 2,
+    momentum: 'shipped', exitCode: -1, lastActivityAt: new Date().toISOString(),
+  });
+
+  assert.equal(posts, 2, 'should retry the submission with the renewed token');
   assert.equal(readAuth().jwt, newJwt);
 });
