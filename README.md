@@ -100,7 +100,7 @@ vibe leaderboard  view the leaderboard from your terminal
 vibe logout       sign out and stop submitting
 ```
 
-The leaderboard ranks by ship days: a day you landed at least one commit with meaningful changes. A session that ships across several days counts once for each of those days. Tabs on the web view switch between this week (Monday to Sunday, UTC), this month, and all time.
+The leaderboard ranks by ships: sessions that landed at least one commit with meaningful changes, counted once per day they ship on. The squares show which days you shipped. Tabs on the web view switch between this week (Monday to Sunday, UTC), this month, and all time.
 
 Sign-in uses the GitHub device flow: no browser callback, just a short code you paste on github.com. Until you run `vibe login`, no network requests are made.
 
@@ -144,7 +144,7 @@ vibe share                   weekly summary card
 vibe share --html            shareable HTML card
 vibe login                   sign in to the leaderboard via github
 vibe logout                  sign out of the leaderboard
-vibe leaderboard             ship days, this week
+vibe leaderboard             ships, this week
 vibe config show             current settings
 vibe config set handle <name> set your @handle (shown on share cards)
 vibe config add-tool <name>  track a new AI CLI tool
