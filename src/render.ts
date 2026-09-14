@@ -168,7 +168,8 @@ export function renderLeaderboard(entries: LeaderboardEntry[], webUrl: string, c
     const rank = String(e.rank).padStart(maxRankLen);
     const handle = e.handle.padEnd(maxHandleLen);
     const count = String(e.shippedCount).padStart(3);
-    const line = `  ${DIM(rank)}  ${handle}  ${DIM('·')}  ${count} ship${e.shippedCount === 1 ? ' ' : 's'}`;
+    const days = e.dayCount === undefined ? '' : DIM(`  over ${e.dayCount} day${e.dayCount === 1 ? '' : 's'}`);
+    const line = `  ${DIM(rank)}  ${handle}  ${DIM('·')}  ${count} ship${e.shippedCount === 1 ? ' ' : 's'}${days}`;
     return isMe ? PURPLE(line) : line;
   });
 

@@ -16,6 +16,7 @@ export interface LeaderboardRow {
   handle: string;
   avatar_url: string | null;
   shipped_count: number;
+  day_count: number;
   last_shipped_at: string;
   first_at: string;
 }
@@ -35,7 +36,10 @@ export interface LeaderboardEntry {
   rank: number;
   handle: string;
   avatarUrl: string | null;
+  // Ships: the unit this product is about, and what the rank is built on.
   shippedCount: number;
+  // Days those ships landed on, shown underneath as context.
+  dayCount: number;
   lastShippedAt: string;
   recentDays: HeatmapDay[];
 }
@@ -86,6 +90,7 @@ async function buildData(env: Env, window: Window): Promise<LeaderboardData> {
   const topRes = await env.DB.prepare(
     `SELECT u.github_id, u.handle, u.avatar_url,
             COUNT(*) AS shipped_count,
+            COUNT(DISTINCT e.day) AS day_count,
             MAX(s.ended_at) AS last_shipped_at,
             MIN(s.started_at) AS first_at
      FROM ship_events e
@@ -131,6 +136,7 @@ async function buildData(env: Env, window: Window): Promise<LeaderboardData> {
       handle: r.handle,
       avatarUrl: r.avatar_url,
       shippedCount: r.shipped_count,
+      dayCount: r.day_count,
       lastShippedAt: r.last_shipped_at,
       recentDays: dayKeys.map((k) => ({ day: k, n: userDays.get(k) ?? 0 })),
     };

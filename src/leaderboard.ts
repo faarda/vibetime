@@ -5,6 +5,9 @@ export interface LeaderboardEntry {
   handle: string;
   avatarUrl: string | null;
   shippedCount: number;
+  // Days those ships landed on. Absent from servers older than this field, so
+  // a CLI pointed at one shows ships alone.
+  dayCount?: number;
 }
 
 interface LeaderboardResponse {
