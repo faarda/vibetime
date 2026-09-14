@@ -30,7 +30,7 @@ const start = current ? monday : new Date(monday.getTime() - 7 * 86400000);
 const end = new Date(start.getTime() + 6 * 86400000);
 const day = (d) => d.toISOString().slice(0, 10);
 
-const sql = `SELECT u.handle, u.avatar_url, COUNT(*) AS ships, MIN(s.started_at) AS first_at
+const sql = `SELECT u.handle, u.avatar_url, SUM(e.ships) AS ships, MIN(s.started_at) AS first_at
   FROM ship_events e
   JOIN users u ON u.github_id = e.user_github_id
   JOIN sessions s ON s.id = e.session_id

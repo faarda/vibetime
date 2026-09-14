@@ -181,7 +181,7 @@ vibe login</pre>
     more
   </div>
   <footer>
-    <div class="definition"><strong style="color:#777">ship</strong> = a session that landed at least one commit with meaningful changes (≥50 lines or ≥3 files), counted once per day it ships on. The smaller number is how many days those ships landed on, and the squares are which ones.</div>
+    <div class="definition"><strong style="color:#777">ship</strong> = each time a session lands new work worth counting: a commit, plus more than 50 lines or more than 3 files. The smaller number is how many days those ships landed on, and the squares are which ones.</div>
     <div class="links"><a href="https://github.com/iamnotstatic/vibetime">github.com/iamnotstatic/vibetime</a> · <code>npm i -g vibetime-cli</code></div>
   </footer>
 </main>

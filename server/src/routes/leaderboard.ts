@@ -77,7 +77,7 @@ async function buildData(env: Env, window: Window): Promise<LeaderboardData> {
   const sinceDay = new Date(sinceMs).toISOString().slice(0, 10);
 
   const totalsRes = await env.DB.prepare(
-    `SELECT COUNT(DISTINCT user_github_id) AS dev_count, COUNT(*) AS session_count
+    `SELECT COUNT(DISTINCT user_github_id) AS dev_count, SUM(ships) AS session_count
      FROM ship_events
      WHERE day >= ?`,
   ).bind(sinceDay).first<{ dev_count: number; session_count: number }>();
@@ -89,7 +89,7 @@ async function buildData(env: Env, window: Window): Promise<LeaderboardData> {
   // product is actually about.
   const topRes = await env.DB.prepare(
     `SELECT u.github_id, u.handle, u.avatar_url,
-            COUNT(*) AS shipped_count,
+            SUM(e.ships) AS shipped_count,
             COUNT(DISTINCT e.day) AS day_count,
             MAX(s.ended_at) AS last_shipped_at,
             MIN(s.started_at) AS first_at
@@ -108,7 +108,7 @@ async function buildData(env: Env, window: Window): Promise<LeaderboardData> {
   const heatmapSinceDay = new Date(Date.now() - HEATMAP_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const placeholders = rows.map(() => '?').join(',');
   const dailyRes = await env.DB.prepare(
-    `SELECT user_github_id, day, COUNT(*) AS n
+    `SELECT user_github_id, day, SUM(ships) AS n
      FROM ship_events
      WHERE day >= ? AND user_github_id IN (${placeholders})
      GROUP BY user_github_id, day`,
