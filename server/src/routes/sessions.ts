@@ -9,10 +9,6 @@ const VALID_TIERS = new Set(['shipped', 'progressed', 'tinkering', 'exploring', 
 const VALID_TOOLS_RE = /^[a-z][a-z0-9_-]{0,31}$/i;
 const MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const MIN_DURATION_S = 60;
-// Anti-gaming: at most this many ship events per user per UTC day. Enforced by
-// silently dropping excess event rows — the session itself still stores, so
-// clients (including pre-0.8 ones that used to see a 429 here) never retry.
-const DAILY_SHIPPED_CAP = 10;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_SHIP_EVENTS = 62;
 const DAY_SLACK_MS = 24 * 60 * 60 * 1000;
@@ -201,23 +197,30 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
   const already = new Set((credited?.results ?? []).map((r) => r.day));
   const newDays = claimedDays.filter((d) => !already.has(d));
 
+  // No per-day ceiling. There used to be one, 10 events per user per UTC day,
+  // silently dropping the rest. It was built when a ship event could appear
+  // without shipping, and it was the only thing bounding that. It is not what
+  // bounds it now: an event needs its own session, a new commit, and a delta
+  // that scores 'shipped' on its own. What the cap actually truncated was
+  // someone running several agents on several branches, which is the workflow
+  // this tool exists to measure, and it truncated them in silence.
+  //
+  // What still bounds the table: one row per (session, day) by primary key,
+  // event days never exceeding commits, earnsEvents on every day, and the
+  // per-user request limiter in ratelimit.ts.
   let landed = 0;
   if (earnsEvents(baseline, stats, newDays.length)) {
     for (const day of newDays) {
-      // Conditional insert in one statement so concurrent submissions can't
-      // race past the per-day cap.
       const res = await env.DB.prepare(
-        `INSERT OR IGNORE INTO ship_events (session_id, user_github_id, day)
-         SELECT ?1, ?2, ?3
-         WHERE (SELECT COUNT(*) FROM ship_events WHERE user_github_id = ?2 AND day = ?3 AND session_id != ?1) < ${DAILY_SHIPPED_CAP}`,
+        `INSERT OR IGNORE INTO ship_events (session_id, user_github_id, day) VALUES (?1, ?2, ?3)`,
       ).bind(parsed.id, auth.sub, day).run();
       if (res.meta.changes > 0) landed++;
     }
   }
 
-  // Spend the delta only on work that was actually credited. A day the cap
-  // swallowed leaves the baseline where it was, so the work rolls forward
-  // instead of evaporating.
+  // Spend the delta only on work that was actually credited. A row lost to a
+  // concurrent writer leaves the baseline where it was, so the work rolls
+  // forward instead of evaporating.
   if (landed > 0) {
     await env.DB.prepare(
       `UPDATE sessions SET event_baseline_commits = ?, event_baseline_lines_added = ?,
