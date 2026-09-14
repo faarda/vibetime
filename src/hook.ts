@@ -6,12 +6,16 @@ import { readConfig } from './config.js';
 import { scoreSession, trackShipEvents } from './score.js';
 import { flushPendingSubmissions } from './submit.js';
 
-// Claude Code and Codex deliver a JSON payload on stdin to every hook command.
-// We read only the fields below — never the transcript contents — so hook-
-// tracked sessions stay within vibetime's "git metadata only" privacy model.
+// Claude Code, Codex, and Cursor deliver a JSON payload on stdin to every hook
+// command. We read only the fields below — never the transcript, prompts, or
+// model output — so hook-tracked sessions stay within vibetime's "git metadata
+// only" privacy model.
 interface HookInput {
   session_id?: string;
+  conversation_id?: string; // Cursor: same as session_id
   cwd?: string;
+  workspace_roots?: string[]; // Cursor: workspace folders (cwd is often absent)
+  cursor_version?: string; // present on every Cursor hook payload
   hook_event_name?: string;
   source?: string; // SessionStart: startup | resume | clear | compact
   reason?: string; // SessionEnd: clear | logout | prompt_input_exit | other
@@ -24,7 +28,37 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const GIT_REFRESH_MS = 15_000;
 
 type HookEvent = 'session-start' | 'activity' | 'session-end';
-export type HookTool = 'claude' | 'codex';
+export type HookTool = 'claude' | 'codex' | 'cursor';
+
+export function parseHookTool(value: string): HookTool {
+  if (value === 'codex' || value === 'cursor') return value;
+  return 'claude';
+}
+
+// Cursor can import Claude Code hooks (third-party skills). Those copies run
+// without `--tool cursor`, so the payload's cursor_version is what identifies
+// them — otherwise a Cursor session would be tagged as Claude.
+function resolveTool(tool: HookTool, input: HookInput): HookTool {
+  if (tool !== 'claude') return tool;
+  if (typeof input.cursor_version === 'string' && input.cursor_version.length > 0) return 'cursor';
+  return 'claude';
+}
+
+function resolveSessionId(input: HookInput): string | undefined {
+  if (input.session_id) return input.session_id;
+  if (input.conversation_id) return input.conversation_id;
+  return undefined;
+}
+
+function resolveCwd(input: HookInput): string {
+  if (input.cwd) return input.cwd;
+  const roots = input.workspace_roots;
+  if (Array.isArray(roots)) {
+    const root = roots.find((r) => typeof r === 'string' && r.length > 0);
+    if (root) return root;
+  }
+  return process.env.CURSOR_PROJECT_DIR || process.cwd();
+}
 
 const EMPTY_STATS: GitDiffStats = { commits: 0, linesAdded: 0, linesRemoved: 0, filesTouched: 0 };
 
@@ -94,13 +128,14 @@ export async function handleHook(event: string, raw: string, tool: HookTool = 'c
     return;
   }
 
-  const sessionId = input.session_id;
+  const sessionId = resolveSessionId(input);
   if (!sessionId || !UUID_RE.test(sessionId)) return;
-  const cwd = input.cwd || process.cwd();
+  const cwd = resolveCwd(input);
+  const resolved = resolveTool(tool, input);
 
   switch (event as HookEvent) {
     case 'session-start':
-      return onSessionStart(sessionId, cwd, tool);
+      return onSessionStart(sessionId, cwd, resolved);
     case 'activity':
       return onActivity(sessionId, cwd);
     case 'session-end':

@@ -10,7 +10,8 @@ import { wrapTool } from './wrap.js';
 import { initShellHooks, removeShellHooks } from './init.js';
 import { installClaudeHooks, removeClaudeHooks } from './claude-hooks.js';
 import { installCodexHooks, removeCodexHooks } from './codex-hooks.js';
-import { handleHook, type HookTool } from './hook.js';
+import { installCursorHooks, removeCursorHooks } from './cursor-hooks.js';
+import { handleHook, parseHookTool } from './hook.js';
 import { login, logout, readAuth } from './auth.js';
 import { fetchLeaderboard } from './leaderboard.js';
 import { flushPendingSubmissions } from './submit.js';
@@ -45,10 +46,11 @@ program
   .action(() => {
     initShellHooks();
     // Unconditional, like the shell functions: hooks are inert config until the
-    // app exists, so someone who installs Claude Code or Codex months from now
-    // is already tracked without remembering to re-run init.
+    // app exists, so someone who installs Claude Code, Codex, or Cursor months
+    // from now is already tracked without remembering to re-run init.
     installClaudeHooks();
     installCodexHooks();
+    installCursorHooks();
   });
 
 program
@@ -58,6 +60,7 @@ program
     removeShellHooks();
     removeClaudeHooks();
     removeCodexHooks();
+    removeCursorHooks();
   });
 
 const hooksCmd = program
@@ -66,18 +69,20 @@ const hooksCmd = program
 
 hooksCmd
   .command('install')
-  .description('track Claude Code and Codex Desktop sessions')
+  .description('track Claude Code, Codex, and Cursor Desktop sessions')
   .action(() => {
     installClaudeHooks();
     installCodexHooks();
+    installCursorHooks();
   });
 
 hooksCmd
   .command('uninstall')
-  .description('stop tracking Claude Code and Codex Desktop sessions')
+  .description('stop tracking Claude Code, Codex, and Cursor Desktop sessions')
   .action(() => {
     removeClaudeHooks();
     removeCodexHooks();
+    removeCursorHooks();
   });
 
 program
@@ -258,20 +263,20 @@ program
     await wrapTool(tool, args);
   });
 
-// Invoked by Claude Code or Codex hooks with the event payload on stdin. Must stay
-// silent on stdout (SessionStart stdout is fed to the model) except for the codex
-// Stop response, and always exit the moment the work is done — a lingering handle
-// (e.g. a submit's keep-alive socket) must never hold the host's hook slot open.
+// Invoked by Claude Code, Codex, or Cursor hooks with the event payload on
+// stdin. Must stay silent on stdout (SessionStart stdout is fed to the model)
+// except for the codex Stop response, and always exit the moment the work is
+// done — a lingering handle (e.g. a submit's keep-alive socket) must never hold
+// the host's hook slot open.
 program
   .command('__hook', { hidden: true })
   .argument('<event>', 'session-start | activity | session-end')
-  .option('--tool <tool>', 'claude | codex', 'claude')
+  .option('--tool <tool>', 'claude | codex | cursor', 'claude')
   .option('--respond-json', 'write an empty JSON hook response')
   .helpOption(false)
   .action(async (event: string, opts: { tool: string; respondJson?: boolean }) => {
     try {
-      const tool: HookTool = opts.tool === 'codex' ? 'codex' : 'claude';
-      await handleHook(event, await readStdin(), tool);
+      await handleHook(event, await readStdin(), parseHookTool(opts.tool));
     } catch {}
     if (opts.respondJson) process.stdout.write('{}\n', () => process.exit(0));
     else process.exit(0);
