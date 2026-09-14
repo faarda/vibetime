@@ -30,13 +30,13 @@ const start = current ? monday : new Date(monday.getTime() - 7 * 86400000);
 const end = new Date(start.getTime() + 6 * 86400000);
 const day = (d) => d.toISOString().slice(0, 10);
 
-const sql = `SELECT u.handle, u.avatar_url, COUNT(*) AS ships, MIN(s.started_at) AS first_at
+const sql = `SELECT u.handle, u.avatar_url, COUNT(DISTINCT e.day) AS days, COUNT(*) AS ships, MIN(s.started_at) AS first_at
   FROM ship_events e
   JOIN users u ON u.github_id = e.user_github_id
   JOIN sessions s ON s.id = e.session_id
   WHERE e.day >= '${day(start)}' AND e.day <= '${day(end)}'
   GROUP BY u.github_id
-  ORDER BY ships DESC, first_at ASC
+  ORDER BY days DESC, ships DESC, first_at ASC
   LIMIT 3`;
 
 const serverDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'server');
@@ -56,11 +56,11 @@ if (rows.length === 0) {
   process.exit(0);
 }
 const pad = Math.max(...rows.map((r) => r.handle.length));
-rows.forEach((r, i) => console.log(`  ${medals[i]} @${r.handle.padEnd(pad)}  ${r.ships} ship${r.ships === 1 ? '' : 's'}`));
+rows.forEach((r, i) => console.log(`  ${medals[i]} @${r.handle.padEnd(pad)}  ${r.days} day${r.days === 1 ? '' : 's'}`));
 
 console.log('\n  ── paste ─────────────────────────────\n');
 console.log(`top shippers on vibetime, ${range}\n`);
-rows.forEach((r, i) => console.log(`${medals[i]} ${r.handle} · ${r.ships} ship${r.ships === 1 ? '' : 's'}`));
+rows.forEach((r, i) => console.log(`${medals[i]} ${r.handle} · ${r.days} day${r.days === 1 ? '' : 's'}`));
 console.log(`\nvibetime.club/leaderboard`);
 console.log();
 
@@ -81,7 +81,7 @@ if (wantHtml) {
       <div style="position:absolute;bottom:6px;right:2px;font-size:44px;line-height:1;filter:drop-shadow(0 3px 10px rgba(0,0,0,0.7));">🥇</div>
     </div>
     <div style="color:#fff;font-size:34px;font-weight:600;margin-top:10px;">${winner.handle}</div>
-    <div style="margin-top:8px;"><span style="color:#a78bfa;font-size:36px;font-weight:700;">${winner.ships}</span> <span style="color:#777;font-size:16px;">ship${winner.ships === 1 ? '' : 's'} this week</span></div>
+    <div style="margin-top:8px;"><span style="color:#a78bfa;font-size:36px;font-weight:700;">${winner.days}</span> <span style="color:#777;font-size:16px;">day${winner.days === 1 ? '' : 's'} shipped</span></div>
   </div>`;
 
   const runnersBlock = runners.length === 0 ? '' : `
@@ -91,7 +91,7 @@ if (wantHtml) {
       <div style="font-size:30px;line-height:1;">${medals[i + 1]}</div>
       ${avatarImg(r, 44)}
       <div style="flex:1;color:#ddd;font-size:17px;">${r.handle}</div>
-      <div style="color:#a78bfa;font-size:20px;font-weight:600;">${r.ships}<span style="color:#666;font-size:12px;font-weight:400;"> ship${r.ships === 1 ? '' : 's'}</span></div>
+      <div style="color:#a78bfa;font-size:20px;font-weight:600;">${r.days}<span style="color:#666;font-size:12px;font-weight:400;"> day${r.days === 1 ? '' : 's'}</span></div>
     </div>`).join('')}
   </div>`;
 

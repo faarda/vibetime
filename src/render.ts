@@ -153,7 +153,7 @@ export function renderLoginPrompt(userCode: string, verificationUri: string): st
 }
 
 export function renderLeaderboard(entries: LeaderboardEntry[], webUrl: string, currentHandle?: string): string {
-  const header = `${PURPLE('◆')} vibe  ·  leaderboard  ·  ship days · this week`;
+  const header = `${PURPLE('◆')} vibe  ·  leaderboard  ·  days shipped · this week`;
   const footer = `  ${DIM(webUrl)}`;
 
   if (entries.length === 0) {
@@ -168,7 +168,7 @@ export function renderLeaderboard(entries: LeaderboardEntry[], webUrl: string, c
     const rank = String(e.rank).padStart(maxRankLen);
     const handle = e.handle.padEnd(maxHandleLen);
     const count = String(e.shippedCount).padStart(3);
-    const line = `  ${DIM(rank)}  ${handle}  ${DIM('·')}  ${count} ships`;
+    const line = `  ${DIM(rank)}  ${handle}  ${DIM('·')}  ${count} days`;
     return isMe ? PURPLE(line) : line;
   });
 
