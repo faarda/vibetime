@@ -127,6 +127,17 @@ export function renderSignedOutNotice(): string {
   return `  ${PURPLE('◆')} signed out · run ${PURPLE('vibe login')} so your ships keep counting\n`;
 }
 
+// Offered right after setup, because signing in is the one step nobody
+// discovers on their own and the leaderboard is why most people install this.
+// It asks rather than assumes: tracking already works without an account.
+export function renderLoginOffer(): string {
+  return `  ${PURPLE('◆')} join the leaderboard? sign in with github so your ships count`;
+}
+
+export function renderLoginSkipped(): string {
+  return `\n  ${PURPLE('◆')} no problem, tracking works without it. join anytime: ${PURPLE('vibe login')}\n`;
+}
+
 export function renderLoginPrompt(userCode: string, verificationUri: string): string {
   const top = DIM('╭' + '─'.repeat(WIDTH - 2) + '╮');
   const bot = DIM('╰' + '─'.repeat(WIDTH - 2) + '╯');

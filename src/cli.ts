@@ -13,7 +13,7 @@ import { installClaudeHooks, removeClaudeHooks } from './claude-hooks.js';
 import { installCodexHooks, removeCodexHooks } from './codex-hooks.js';
 import { installCursorHooks, removeCursorHooks } from './cursor-hooks.js';
 import { handleHook, parseHookTool } from './hook.js';
-import { login, logout, readAuth, needsLogin } from './auth.js';
+import { login, logout, readAuth, needsLogin, offerLogin } from './auth.js';
 import { fetchLeaderboard } from './leaderboard.js';
 import { flushPendingSubmissions } from './submit.js';
 import { WEB_BASE } from './api.js';
@@ -41,7 +41,7 @@ program
   .version(version)
   .enablePositionalOptions();
 
-function runInit(): void {
+async function runInit(): Promise<void> {
   setInstallOptOut({ shell: false, desktop: false });
   initShellHooks();
   // Unconditional, like the shell functions: hooks are inert config until the
@@ -50,6 +50,10 @@ function runInit(): void {
   installClaudeHooks();
   installCodexHooks();
   installCursorHooks();
+
+  // Setup is the only moment we have a new user's attention, so this is where
+  // the leaderboard gets offered. It asks, and it no-ops when it can't.
+  await offerLogin();
 }
 
 async function showStatus(): Promise<void> {
@@ -84,7 +88,7 @@ program
       await showStatus();
       return;
     }
-    runInit();
+    await runInit();
   });
 
 program
