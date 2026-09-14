@@ -210,7 +210,7 @@ program
 
 program
   .command('leaderboard')
-  .description('ship days, this week')
+  .description('ships, this week')
   .action(async () => {
     await flushPendingSubmissions(1500).catch(() => {});
     try {

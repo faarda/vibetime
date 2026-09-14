@@ -52,7 +52,7 @@ function windowRange(start: Date, now: Date): string {
 export function renderLeaderboard(data: LeaderboardData, window: Window, updatedAt: Date, windowStart?: Date | null): string {
   const { entries, devCount, sessionCount } = data;
   const devNoun = devCount === 1 ? 'developer' : 'developers';
-  const sessionNoun = sessionCount === 1 ? 'ship day' : 'ship days';
+  const sessionNoun = sessionCount === 1 ? 'ship' : 'ships';
   const rangeLabel = windowStart ? ` <span class="range">· ${windowRange(windowStart, updatedAt)}</span>` : '';
   const scaleLine = entries.length === 0
     ? ''
@@ -73,7 +73,7 @@ vibe login</pre>
         return `<tr>
           <td class="${rankClass}">${e.rank}</td>
           <td class="who"><a href="https://github.com/${handle}" rel="nofollow noopener">${avatar}<span>${handle}</span></a></td>
-          <td class="shipped">${e.shippedCount}<span class="ships">${e.shipCount} ship${e.shipCount === 1 ? '' : 's'}</span></td>
+          <td class="shipped">${e.shippedCount}<span class="days">${e.dayCount} day${e.dayCount === 1 ? '' : 's'}</span></td>
           <td class="activity"><span class="heatmap">${heatmapCells(e.recentDays)}</span></td>
           <td class="last">${escapeHtml(relativeTime(e.lastShippedAt, updatedAt))}</td>
         </tr>`;
@@ -109,8 +109,8 @@ vibe login</pre>
   tbody tr:hover td { background: #111; }
   td.rank { width: 44px; color: #666; text-align: right; font-variant-numeric: tabular-nums; }
   td.rank-top { color: #a78bfa; font-weight: 600; }
-  td.shipped { width: 86px; text-align: right; color: #a78bfa; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 16px; }
-  td.shipped .ships { display: block; color: #555; font-size: 10px; font-weight: 400; letter-spacing: 0.2px; margin-top: 2px; }
+  td.shipped { width: 84px; text-align: right; color: #a78bfa; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 16px; }
+  td.shipped .days { display: block; color: #555; font-size: 10px; font-weight: 400; letter-spacing: 0.2px; margin-top: 2px; }
   td.activity { width: 110px; }
   td.last { width: 100px; text-align: right; color: #666; font-size: 12px; font-variant-numeric: tabular-nums; }
   td.who a { color: #e5e5e5; text-decoration: none; display: flex; align-items: center; gap: 10px; }
@@ -136,7 +136,7 @@ vibe login</pre>
     body { padding: 20px 12px; }
     tbody td, thead th { padding: 12px 4px; }
     td.last, thead th.col-last { display: none; }
-    td.shipped, thead th.col-shipped { width: 66px; }
+    td.shipped, thead th.col-shipped { width: 60px; }
     td.shipped { font-size: 14px; }
     td.activity, thead th.col-activity { width: 80px; }
     .heatmap { gap: 2px; }
@@ -163,7 +163,7 @@ vibe login</pre>
       <tr>
         <th class="col-rank">#</th>
         <th class="col-developer">developer</th>
-        <th class="col-shipped">days</th>
+        <th class="col-shipped">ships</th>
         <th class="col-activity">last 7 days</th>
         <th class="col-last">last shipped</th>
       </tr>
@@ -181,7 +181,7 @@ vibe login</pre>
     more
   </div>
   <footer>
-    <div class="definition"><strong style="color:#777">days</strong> = days you landed at least one commit with meaningful changes (≥50 lines or ≥3 files). Equal days are ranked by how much you shipped, which is what the squares show.</div>
+    <div class="definition"><strong style="color:#777">ship</strong> = a session that landed at least one commit with meaningful changes (≥50 lines or ≥3 files), counted once per day it ships on. The smaller number is how many days those ships landed on, and the squares are which ones.</div>
     <div class="links"><a href="https://github.com/iamnotstatic/vibetime">github.com/iamnotstatic/vibetime</a> · <code>npm i -g vibetime-cli</code></div>
   </footer>
 </main>
