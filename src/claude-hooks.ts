@@ -51,6 +51,12 @@ function vibeCommand(event: HookEvent): string {
   return `${shellQuote(process.execPath)} ${shellQuote(cli)} __hook ${event}`;
 }
 
+export function hasClaudeHooks(): boolean {
+  const events = readSettings()?.hooks;
+  if (!events) return false;
+  return Object.values(events).some((list) => Array.isArray(list) && list.some((g) => isVibeHook(g)));
+}
+
 export function isVibeHook(group: HookGroup): boolean {
   // `__hook` is our coined subcommand — matching it alone is enough. Don't also
   // require the literal "vibe" in the path: a dev clone in a differently named
@@ -79,10 +85,11 @@ function writeSettings(settings: Settings): void {
   writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
 }
 
-export function installClaudeHooks(): void {
+export function installClaudeHooks(silent = false): void {
+  const say = (msg: string) => { if (!silent) console.log(msg); };
   const settings = readSettings();
   if (settings === null) {
-    console.log(`\n  ${RED('✗')} vibe: ${SETTINGS_PATH} is not valid JSON — fix it and re-run\n`);
+    say(`\n  ${RED('✗')} vibe: ${SETTINGS_PATH} is not valid JSON — fix it and re-run\n`);
     return;
   }
 
@@ -108,13 +115,13 @@ export function installClaudeHooks(): void {
   writeSettings(settings);
 
   if (added === 0) {
-    console.log(`\n  ${PURPLE('◆')} claude code desktop tracking already installed\n`);
+    say(`\n  ${PURPLE('◆')} claude code desktop tracking already installed\n`);
     return;
   }
-  console.log(`\n  ${PURPLE('◆')} claude code desktop tracking installed in ${SETTINGS_PATH}\n`);
-  console.log(`  vibe now records a session every time you use Claude Code Desktop.`);
-  console.log(`  settings are hot-reloaded — open a new Claude Code Desktop session to start.\n`);
-  if (existing > 0) console.log(`  (${existing} event${existing === 1 ? '' : 's'} were already wired up)\n`);
+  say(`\n  ${PURPLE('◆')} claude code desktop tracking installed in ${SETTINGS_PATH}\n`);
+  say(`  vibe now records a session every time you use Claude Code Desktop.`);
+  say(`  settings are hot-reloaded — open a new Claude Code Desktop session to start.\n`);
+  if (existing > 0) say(`  (${existing} event${existing === 1 ? '' : 's'} were already wired up)\n`);
 }
 
 export function removeClaudeHooks(): void {

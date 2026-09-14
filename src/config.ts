@@ -12,6 +12,12 @@ export interface VibeConfig {
   handle?: string;
   thresholdLines: number;
   thresholdFiles: number;
+  // Deliberate removals. Reconcile repairs an install on every session start,
+  // so without a record of what the user took away it would put it straight
+  // back and `vibe uninstall` would be a no-op that reinstalls itself.
+  removedTools?: string[];
+  shellHooksOptOut?: boolean;
+  desktopHooksOptOut?: boolean;
 }
 
 // Overridable so tests can run the full session flow against a scratch dir
@@ -69,6 +75,14 @@ export function addTool(name: string): void {
     return;
   }
 
+  // Adding it back is the user reversing a removal, so drop the opt-out.
+  const config = readConfig();
+  const lower = name.toLowerCase();
+  if ((config.removedTools ?? []).includes(lower)) {
+    config.removedTools = config.removedTools!.filter((t) => t !== lower);
+    writeConfig(config);
+  }
+
   // A default tool is only "already added by vibe init" while its hooks are
   // actually in the rc file — after a remove-tool it can be re-added.
   const added = appendHook(name, rcFile, shell);
@@ -94,6 +108,16 @@ export function removeTool(name: string): void {
     if (!existsSync(rcFile)) continue;
     if (removeHook(name, rcFile)) removed = true;
   }
+
+  // Remember it even when no hook line was found: the user has stated intent,
+  // and reconcile must not add this tool back on the next session.
+  const config = readConfig();
+  const lower = name.toLowerCase();
+  if (!(config.removedTools ?? []).includes(lower)) {
+    config.removedTools = [...(config.removedTools ?? []), lower];
+    writeConfig(config);
+  }
+
   if (removed) {
     console.log(`\n  ${PURPLE('◆')} ${name} removed. restart your terminal to stop tracking.\n`);
     if (DEFAULT_TOOLS.includes(name.toLowerCase())) {
@@ -116,4 +140,13 @@ export async function promptHandle(): Promise<string> {
       resolve(handle);
     });
   });
+}
+
+// Records that a removal (or a re-install) was deliberate, so the session-start
+// repair in reconcile.ts respects it instead of undoing the user's choice.
+export function setInstallOptOut(opts: { shell?: boolean; desktop?: boolean }): void {
+  const config = readConfig();
+  if (opts.shell !== undefined) config.shellHooksOptOut = opts.shell;
+  if (opts.desktop !== undefined) config.desktopHooksOptOut = opts.desktop;
+  writeConfig(config);
 }

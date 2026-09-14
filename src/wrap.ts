@@ -7,6 +7,7 @@ import { readConfig } from './config.js';
 import { scoreSession, trackShipEvents, type ShipEventState } from './score.js';
 import { renderEndcard, renderSignedOutNotice } from './render.js';
 import { needsLogin } from './auth.js';
+import { reconcileInstall } from './reconcile.js';
 import { flushPendingSubmissions, submitInProgress } from './submit.js';
 import { getRecommendedVersion } from './api.js';
 import { TUNABLES, refreshTunables } from './remote-config.js';
@@ -49,6 +50,11 @@ export async function wrapTool(tool: string, args: string[]): Promise<void> {
   let lastActivityAt = startedAt;
   let totalGapMs = 0;
   let idleSince = 0;
+
+  // Repair the install before anything else: a new default tool or a newly
+  // supported desktop app reaches existing users here, not by them re-running
+  // a command they have no reason to know about.
+  reconcileInstall();
 
   // Refresh the server tunables in the background; whatever it fetches applies
   // to the next session, never this one mid-flight.

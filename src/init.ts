@@ -145,6 +145,33 @@ function stripHooksFromFile(rcFile: string): boolean {
   return true;
 }
 
+// True once the user has installed anything: the rc block, or hooks in any
+// desktop app's config. Reconcile REPAIRS an existing install, it never
+// creates one, so a machine that never ran `vibe init` is left alone.
+export function hasShellHooks(): boolean {
+  return candidateRcFiles().some((rcFile) => {
+    if (!existsSync(rcFile)) return false;
+    return readFileSync(rcFile, 'utf-8').includes('vibe __wrap ');
+  });
+}
+
+// Add default tools this install is missing: a new tool in a new release
+// otherwise reaches nobody, because init early-returns once its marker is in
+// the rc file. Deliberate removals are recorded in config and respected here.
+export function reconcileShellHooks(removedTools: string[]): string[] {
+  const { shell, rcFile } = detectShell();
+  if (!existsSync(rcFile)) return [];
+  const content = readFileSync(rcFile, 'utf-8');
+  if (!content.includes(HOOK_MARKER)) return [];
+
+  const added: string[] = [];
+  for (const tool of DEFAULT_TOOLS) {
+    if (removedTools.includes(tool)) continue;
+    if (appendHook(tool, rcFile, shell)) added.push(tool);
+  }
+  return added;
+}
+
 export function removeShellHooks(): void {
   let removedAny = false;
   for (const rcFile of candidateRcFiles()) {
