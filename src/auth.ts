@@ -1,13 +1,15 @@
 import { join } from 'node:path';
 import { chmodSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import open from 'open';
+import { createInterface } from 'node:readline';
 import { VIBE_DIR, ensureVibeDir } from './config.js';
-import { request, GITHUB_CLIENT_ID, ApiError } from './api.js';
-import { renderLoginPrompt } from './render.js';
+import { request, GITHUB_CLIENT_ID, GITHUB_BASE, ApiError } from './api.js';
+import { renderLoginPrompt, renderLoginOffer, renderLoginSkipped } from './render.js';
 import chalk from 'chalk';
 import { PURPLE } from './colors.js';
 
 const RED = chalk.hex('#EF4444');
+const DIM = chalk.hex('#444444');
 
 export const AUTH_PATH = join(VIBE_DIR, 'auth.json');
 
@@ -137,10 +139,41 @@ function writeAuth(record: AuthRecord): void {
   chmodSync(AUTH_PATH, 0o600);
 }
 
+// Offer the leaderboard once setup finishes. Deliberately an offer, not an
+// action: tracking works without an account, and the device flow polls GitHub
+// for up to fifteen minutes, so it must never start on its own.
+//
+// Skipped entirely when already signed in, when stdin is not a terminal (a
+// script, a pipe, CI — none of which can answer and none of which may hang),
+// and when the answer is no.
+// The stream is a parameter so the blocking path is testable; a hang here would
+// stall someone's terminal and no smoke test would catch it.
+export async function offerLogin(input: NodeJS.ReadStream = process.stdin): Promise<void> {
+  if (readAuth() || needsLogin()) return;
+  if (!input.isTTY) return;
+
+  const answer = await ask(`${renderLoginOffer()} ${DIM('[Y/n]')} `, input);
+  if (answer.trim().toLowerCase().startsWith('n')) {
+    console.log(renderLoginSkipped());
+    return;
+  }
+  await login();
+}
+
+function ask(question: string, input: NodeJS.ReadStream): Promise<string> {
+  const rl = createInterface({ input, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(`\n${question}`, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
 export async function login(): Promise<void> {
   let device: DeviceCodeResponse;
   try {
-    device = await request<DeviceCodeResponse>('https://github.com/login/device/code', {
+    device = await request<DeviceCodeResponse>(`${GITHUB_BASE}/login/device/code`, {
       method: 'POST',
       body: { client_id: GITHUB_CLIENT_ID, scope: 'read:user' },
       headers: { accept: 'application/json' },
@@ -194,7 +227,7 @@ async function pollGithub(device: DeviceCodeResponse): Promise<string | null> {
     await new Promise((r) => setTimeout(r, interval * 1000));
     let res: PollResponse;
     try {
-      res = await request<PollResponse>('https://github.com/login/oauth/access_token', {
+      res = await request<PollResponse>(`${GITHUB_BASE}/login/oauth/access_token`, {
         method: 'POST',
         body: {
           client_id: GITHUB_CLIENT_ID,

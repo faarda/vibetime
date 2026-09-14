@@ -6,6 +6,11 @@ export const WEB_BASE = process.env.VIBE_WEB ?? 'https://vibetime.club';
 
 export const GITHUB_CLIENT_ID = process.env.VIBE_GITHUB_CLIENT_ID ?? 'Ov23liTitygBey3l86qT';
 
+// Overridable for the same reason as the others: with this hardcoded, the
+// device flow could only ever be exercised against real GitHub, so the login
+// path had no tests at all.
+export const GITHUB_BASE = process.env.VIBE_GITHUB_BASE ?? 'https://github.com';
+
 const require = createRequire(import.meta.url);
 export const CLI_VERSION: string = require('../package.json').version;
 
