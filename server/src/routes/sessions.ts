@@ -99,7 +99,6 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
     filesTouched: parsed.filesTouched,
   });
 
-  // Prior state drives the ownership check and the event baseline.
   const prior = await env.DB.prepare(
     `SELECT user_github_id AS uid,
             event_baseline_commits       AS baseCommits,
@@ -122,8 +121,7 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
     linesRemoved: parsed.linesRemoved,
     filesTouched: parsed.filesTouched,
   };
-  // A session nobody has credited yet starts from zero, like a fresh CLI
-  // baseline, so its first real shipping day still lands.
+  // Uncredited sessions start from zero so a first shipping day still lands.
   const baseline: Stats = clampBaseline({
     commits: prior?.baseCommits ?? 0,
     linesAdded: prior?.baseLinesAdded ?? 0,
@@ -162,24 +160,15 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
     baseline.commits, baseline.linesAdded, baseline.linesRemoved, baseline.filesTouched,
   ).run();
 
-  // One row per (session, day); past days are announced history and immutable.
+  // Where the day list comes from depends on the client version; the test it
+  // has to pass does not. Both go through earnsEvents.
   //
-  // Where the day list comes from still depends on the client version, but the
-  // test it has to pass no longer does. Both paths go through earnsEvents, so
-  // a day counts only when the work since the last credited event would score
-  // 'shipped' on its own.
-  //
-  // This used to be two rules. A v0.8+ client's list was taken verbatim, and a
-  // pre-0.8 client's end day was derived from cumulative momentum plus "did
-  // commits grow" — one commit, no meaningfulness test, every day, forever,
-  // for any long-lived session that had ever shipped. The two drifted because
-  // nothing compared them; test/score-parity.test.mjs now does.
+  // Past days are announced history, so this DELETE and the ships bump below
+  // both stay on today or later: a published number can never move.
   const todayDay = new Date().toISOString().slice(0, 10);
   let claimedDays: string[];
   if (parsed.shipEvents) {
     claimedDays = [...new Set(parsed.shipEvents)].sort();
-    // Reconciliation is unchanged and still bounded to today and later, so
-    // announced history stays append-only.
     await env.DB.prepare(
       `DELETE FROM ship_events WHERE session_id = ? AND day >= ?${claimedDays.length ? ` AND day NOT IN (${claimedDays.map(() => '?').join(',')})` : ''}`,
     ).bind(parsed.id, todayDay, ...claimedDays).run();
@@ -187,8 +176,8 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
     claimedDays = momentum === 'shipped' ? [parsed.endedAt.slice(0, 10)] : [];
   }
 
-  // Days this session already holds are paid for; re-claiming one costs
-  // nothing and must not consume the delta a new day would need.
+  // A day already credited is paid for, so re-claiming it must not spend the
+  // delta a new day needs.
   const credited = claimedDays.length
     ? await env.DB.prepare(
         `SELECT day FROM ship_events WHERE session_id = ? AND day IN (${claimedDays.map(() => '?').join(',')})`,
@@ -197,17 +186,9 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
   const already = new Set((credited?.results ?? []).map((r) => r.day));
   const newDays = claimedDays.filter((d) => !already.has(d));
 
-  // No per-day ceiling. There used to be one, 10 events per user per UTC day,
-  // silently dropping the rest. It was built when a ship event could appear
-  // without shipping, and it was the only thing bounding that. It is not what
-  // bounds it now: an event needs its own session, a new commit, and a delta
-  // that scores 'shipped' on its own. What the cap actually truncated was
-  // someone running several agents on several branches, which is the workflow
-  // this tool exists to measure, and it truncated them in silence.
-  //
-  // What still bounds the table: one row per (session, day) by primary key,
+  // No per-user ceiling. What bounds this table: one row per (session, day),
   // event days never exceeding commits, earnsEvents on every day, and the
-  // per-user request limiter in ratelimit.ts.
+  // request limiter.
   let landed = 0;
   if (newDays.length > 0) {
     if (earnsEvents(baseline, stats, newDays.length)) {
@@ -219,13 +200,7 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
       }
     }
   } else if (earnsEvents(baseline, stats, 1)) {
-    // Shipped again on a day this session already holds. One row per
-    // (session, day) is a storage shape, not a judgement about the work, so
-    // the count goes up instead of the effort being dropped.
-    //
-    // Only ever today or later. Bumping a past day would rewrite a number that
-    // has already been announced, which is the one thing ship events promise
-    // never to do.
+    // Shipped again on a day already credited: count up rather than drop it.
     const bumpDay = claimedDays.filter((d) => d >= todayDay).sort().pop();
     if (bumpDay) {
       const res = await env.DB.prepare(
@@ -235,9 +210,8 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
     }
   }
 
-  // Spend the delta only on work that was actually credited. A row lost to a
-  // concurrent writer leaves the baseline where it was, so the work rolls
-  // forward instead of evaporating.
+  // Only credited work spends the delta, so a row a concurrent writer beat us
+  // to rolls forward instead of evaporating.
   if (landed > 0) {
     await env.DB.prepare(
       `UPDATE sessions SET event_baseline_commits = ?, event_baseline_lines_added = ?,
