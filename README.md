@@ -100,11 +100,17 @@ vibe leaderboard  view the leaderboard from your terminal
 vibe logout       sign out and stop submitting
 ```
 
-The leaderboard ranks users by `shipped` sessions in the last rolling 7 days. Tabs on the web view switch to last 30 days or all time.
+The leaderboard ranks by ship days: a day you landed at least one commit with meaningful changes. A session that ships across several days counts once for each of those days. Tabs on the web view switch between this week (Monday to Sunday, UTC), this month, and all time.
 
 Sign-in uses the GitHub device flow: no browser callback, just a short code you paste on github.com. Until you run `vibe login`, no network requests are made.
 
 Once logged in, the endcard renders as usual and the session submits in the background. If you're offline the submit retries at the end of the next session, so anything you ship will eventually appear.
+
+**When you show up.** Signing in doesn't put you on the leaderboard, your first ship does: a session of at least a minute that lands a commit with meaningful changes. Terminal sessions submit as soon as Vibetime sees that, usually within a minute of the commit, so you appear while you're still working. Desktop sessions submit when the session ends. The page itself caches for a minute on top of that.
+
+Signed in after you'd already been tracking? Nothing is lost. Sessions from the last two weeks submit on the next flush, and `vibe leaderboard` triggers one immediately.
+
+Still not there? Run `vibe status`. A session marked `progressed` or `tinkering` didn't qualify, and that's the point: only shipping scores.
 
 **Submitted fields:** `tool`, `startedAt`, `endedAt`, `durationSeconds`, `commits`, `linesAdded`, `linesRemoved`, `filesTouched`, `momentum`, and a SHA-256 hash of the project name. Branch names, raw repo names, exit codes, and your local handle never leave the machine.
 
@@ -138,7 +144,7 @@ vibe share                   weekly summary card
 vibe share --html            shareable HTML card
 vibe login                   sign in to the leaderboard via github
 vibe logout                  sign out of the leaderboard
-vibe leaderboard             shipped sessions, last 7 days
+vibe leaderboard             ship days, this week
 vibe config show             current settings
 vibe config set handle <name> set your @handle (shown on share cards)
 vibe config add-tool <name>  track a new AI CLI tool
