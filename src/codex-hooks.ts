@@ -158,7 +158,9 @@ export function installCodexHooks(path = defaultHooksPath()): void {
 
   const action = added > 0 ? 'installed' : 'updated';
   console.log(`\n  ${PURPLE('◆')} codex desktop tracking ${action} in ${path}\n`);
-  console.log(`  Open a new Codex session to start tracking. User-level hooks need no approval.\n`);
+  console.log(`  Open a new Codex session to start tracking. If sessions don't appear in`);
+  console.log(`  vibe status, Codex is waiting for you to trust the hooks: Settings > Hooks`);
+  console.log(`  in the desktop app, or /hooks in the CLI.\n`);
   if (existing > 0) console.log(`  (${existing} event${existing === 1 ? '' : 's'} were already wired up)\n`);
 }
 
