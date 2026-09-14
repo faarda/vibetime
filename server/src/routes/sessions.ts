@@ -209,11 +209,28 @@ export async function submitSession(request: Request, env: Env): Promise<Respons
   // event days never exceeding commits, earnsEvents on every day, and the
   // per-user request limiter in ratelimit.ts.
   let landed = 0;
-  if (earnsEvents(baseline, stats, newDays.length)) {
-    for (const day of newDays) {
+  if (newDays.length > 0) {
+    if (earnsEvents(baseline, stats, newDays.length)) {
+      for (const day of newDays) {
+        const res = await env.DB.prepare(
+          `INSERT OR IGNORE INTO ship_events (session_id, user_github_id, day, ships) VALUES (?1, ?2, ?3, 1)`,
+        ).bind(parsed.id, auth.sub, day).run();
+        if (res.meta.changes > 0) landed++;
+      }
+    }
+  } else if (earnsEvents(baseline, stats, 1)) {
+    // Shipped again on a day this session already holds. One row per
+    // (session, day) is a storage shape, not a judgement about the work, so
+    // the count goes up instead of the effort being dropped.
+    //
+    // Only ever today or later. Bumping a past day would rewrite a number that
+    // has already been announced, which is the one thing ship events promise
+    // never to do.
+    const bumpDay = claimedDays.filter((d) => d >= todayDay).sort().pop();
+    if (bumpDay) {
       const res = await env.DB.prepare(
-        `INSERT OR IGNORE INTO ship_events (session_id, user_github_id, day) VALUES (?1, ?2, ?3)`,
-      ).bind(parsed.id, auth.sub, day).run();
+        `UPDATE ship_events SET ships = ships + 1 WHERE session_id = ? AND day = ?`,
+      ).bind(parsed.id, bumpDay).run();
       if (res.meta.changes > 0) landed++;
     }
   }
