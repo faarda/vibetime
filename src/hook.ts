@@ -4,8 +4,9 @@ import { isGitRepo, getHeadSha, getDiffStats, getReposDiffStats, baselineRepos, 
 import { refreshAndReap } from './rescore.js';
 import { readConfig } from './config.js';
 import { scoreSession, trackShipEvents } from './score.js';
-import { flushPendingSubmissions } from './submit.js';
+import { flushPendingSubmissions, submitInProgress } from './submit.js';
 import { reconcileInstall } from './reconcile.js';
+import { TUNABLES, refreshTunables } from './remote-config.js';
 
 // Claude Code, Codex, and Cursor deliver a JSON payload on stdin to every hook
 // command. We read only the fields below — never the transcript, prompts, or
@@ -27,6 +28,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Skip a git diff on rapid-fire activity events (e.g. bursts of parallel tool
 // calls); duration still accumulates, only the git stats refresh is throttled.
 const GIT_REFRESH_MS = 15_000;
+
+const IN_PROGRESS_SUBMIT_INTERVAL_MS = TUNABLES.inProgressSubmitIntervalMs;
+// Any network a hook does, it does inside the editor event timeout, so this
+// stays well under the 10s the session-start and activity events allow.
+const HOOK_NETWORK_BUDGET_MS = 1200;
 
 type HookEvent = 'session-start' | 'activity' | 'session-end';
 export type HookTool = 'claude' | 'codex' | 'cursor';
@@ -146,8 +152,10 @@ export async function handleHook(event: string, raw: string, tool: HookTool = 'c
 
 async function onSessionStart(sessionId: string, cwd: string, tool: HookTool): Promise<void> {
   // Desktop-only users never start a wrapped session, so this is their repair
-  // path. Not on activity events: those fire on every tool call.
+  // path, and their only chance to pick up server-tuned timings. Not on
+  // activity events: those fire on every tool call.
   reconcileInstall();
+  await refreshTunables(HOOK_NETWORK_BUDGET_MS).catch(() => {});
   await refreshAndReap();
 
   // SessionStart can also fire when an existing conversation is resumed — key
@@ -225,6 +233,31 @@ async function onActivity(sessionId: string, cwd: string): Promise<void> {
   try {
     await updateSession(sessionId, updates);
   } catch {}
+
+  await submitProgress({ ...session, ...updates });
+}
+
+// Mirrors the wrapper's poller, so a desktop session counts the same as a
+// terminal one: the server credits one ship per delta it receives, and
+// submitting only at session end caps a whole day at one. Marked before
+// sending, so a failure waits for the next window instead of looping.
+async function submitProgress(session: Session): Promise<void> {
+  if (session.exitCode !== -1 || session.momentum !== 'shipped') return;
+
+  const signature = `${session.commits}:${session.linesAdded}:${session.linesRemoved}:${session.filesTouched}:${(session.shipEvents ?? []).length}`;
+  if (signature === session.lastProgressSignature) return;
+
+  const last = session.lastProgressSubmitAt ? Date.parse(session.lastProgressSubmitAt) : 0;
+  if (last && Date.now() - last < IN_PROGRESS_SUBMIT_INTERVAL_MS) return;
+
+  try {
+    await updateSession(session.id, {
+      lastProgressSubmitAt: new Date().toISOString(),
+      lastProgressSignature: signature,
+    });
+  } catch { return; }
+
+  await submitInProgress(session, HOOK_NETWORK_BUDGET_MS).catch(() => {});
 }
 
 async function onSessionEnd(sessionId: string, cwd: string): Promise<void> {

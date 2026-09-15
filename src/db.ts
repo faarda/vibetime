@@ -43,6 +43,10 @@ export interface Session {
   // score.ts; a multi-day session earns each day's event with that day's work.
   shipEvents?: string[];
   eventBaseline?: { commits: number; linesAdded: number; linesRemoved: number; filesTouched: number };
+  // Throttle for the hook path's in-progress submits, persisted rather than
+  // held in memory like the wrapper's: every hook event is its own process.
+  lastProgressSubmitAt?: string;
+  lastProgressSignature?: string;
 }
 
 interface DbSchema {
