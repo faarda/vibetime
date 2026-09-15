@@ -38,8 +38,10 @@ function clamp(key: keyof Tunables, value: unknown): number {
 
 // Read once at module load: every consumer (wrapper poller, hook engine,
 // reaper, grace rescore) sees the same values for the life of the process.
-// Hook processes must never fetch — codex gives session-end hooks 3 seconds —
-// so this is a local file read only; refreshTunables() below does the network.
+// This is a local file read only, so it is safe on any path; refreshTunables()
+// below does the network, and a hook may only call it where the event's
+// timeout allows (session-start and activity get 10s, but codex caps
+// session-end at 3s, so that path stays local).
 function load(): Tunables & { fetchedAt?: string } {
   if (!existsSync(CACHE_PATH)) return { ...DEFAULTS };
   try {

@@ -30,8 +30,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const GIT_REFRESH_MS = 15_000;
 
 const IN_PROGRESS_SUBMIT_INTERVAL_MS = TUNABLES.inProgressSubmitIntervalMs;
-// Tighter than the wrapper's: this runs inside the editor's hook timeout.
-const PROGRESS_SUBMIT_BUDGET_MS = 1200;
+// Any network a hook does, it does inside the editor event timeout, so this
+// stays well under the 10s the session-start and activity events allow.
+const HOOK_NETWORK_BUDGET_MS = 1200;
 
 type HookEvent = 'session-start' | 'activity' | 'session-end';
 export type HookTool = 'claude' | 'codex' | 'cursor';
@@ -154,7 +155,7 @@ async function onSessionStart(sessionId: string, cwd: string, tool: HookTool): P
   // path, and their only chance to pick up server-tuned timings. Not on
   // activity events: those fire on every tool call.
   reconcileInstall();
-  await refreshTunables(PROGRESS_SUBMIT_BUDGET_MS).catch(() => {});
+  await refreshTunables(HOOK_NETWORK_BUDGET_MS).catch(() => {});
   await refreshAndReap();
 
   // SessionStart can also fire when an existing conversation is resumed — key
@@ -256,7 +257,7 @@ async function submitProgress(session: Session): Promise<void> {
     });
   } catch { return; }
 
-  await submitInProgress(session, PROGRESS_SUBMIT_BUDGET_MS).catch(() => {});
+  await submitInProgress(session, HOOK_NETWORK_BUDGET_MS).catch(() => {});
 }
 
 async function onSessionEnd(sessionId: string, cwd: string): Promise<void> {
