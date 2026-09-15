@@ -63,6 +63,13 @@ export function renderEndcard(session: Session): string {
   const side = DIM('│');
   const empty = `${side}${' '.repeat(WIDTH - 2)}${side}`;
 
+  // Its own row rather than an extra clause on the stats line: the card is a
+  // fixed 47 columns and the stats line is already close to full. Nothing to
+  // say when there were no commits, or when counting is off (undefined).
+  const pushedRow = session.pushedCommits !== undefined && session.commits > 0
+    ? [`${side}${pad(`  ${DIM(`${session.pushedCommits} of ${session.commits} pushed`)}`, WIDTH - 2)}${side}`]
+    : [];
+
   return [
     '',
     top,
@@ -70,6 +77,7 @@ export function renderEndcard(session: Session): string {
     sep,
     empty,
     `${side}${statsPadded}${side}`,
+    ...pushedRow,
     empty,
     `${side}${barPadded}${side}`,
     empty,
@@ -105,7 +113,12 @@ export function renderStatus(sessions: Session[], signedOut = false): string {
   const totalSeconds = sessions.reduce((sum, s) => sum + s.durationSeconds, 0);
   const shipped = sessions.filter(s => s.momentum === 'shipped').length;
   const total = formatDuration(totalSeconds);
-  const summary = `  ${total} total  ·  ${shipped} of ${sessions.length} sessions shipped`;
+  // Only when at least one of today's sessions was actually counted — off, or
+  // sessions recorded before it was switched on, say nothing rather than 0.
+  const counted = sessions.filter(s => s.pushedCommits !== undefined);
+  const pushed = counted.reduce((sum, s) => sum + (s.pushedCommits ?? 0), 0);
+  const pushedSuffix = counted.length > 0 ? `  ·  ${pushed} commit${pushed === 1 ? '' : 's'} pushed` : '';
+  const summary = `  ${total} total  ·  ${shipped} of ${sessions.length} sessions shipped${pushedSuffix}`;
 
   return [
     '',

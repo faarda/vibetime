@@ -18,6 +18,11 @@ export interface VibeConfig {
   removedTools?: string[];
   shellHooksOptOut?: boolean;
   desktopHooksOptOut?: boolean;
+  // Count how many of a session's commits reached a remote. Off by default:
+  // it costs an extra `git rev-list` per repo per poll, and it is a number
+  // some people would rather not have kept even locally. See countPushes in
+  // the README for what it does and doesn't read.
+  countPushes?: boolean;
 }
 
 // Overridable so tests can run the full session flow against a scratch dir
@@ -29,6 +34,7 @@ const CONFIG_PATH = join(VIBE_DIR, 'config.json');
 export const DEFAULTS: VibeConfig = {
   thresholdLines: 50,
   thresholdFiles: 3,
+  countPushes: false,
 };
 
 export function ensureVibeDir(): void {
@@ -55,6 +61,15 @@ export function readConfig(): VibeConfig {
 export function writeConfig(config: VibeConfig): void {
   ensureVibeDir();
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
+}
+
+// on | off | true | false | yes | no | 1 | 0 — anything else is a typo worth
+// rejecting rather than quietly reading as false.
+export function parseBoolValue(value: string): boolean | null {
+  const v = value.trim().toLowerCase();
+  if (['on', 'true', 'yes', '1'].includes(v)) return true;
+  if (['off', 'false', 'no', '0'].includes(v)) return false;
+  return null;
 }
 
 export function getHandle(): string {

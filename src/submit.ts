@@ -11,6 +11,10 @@ function projectHash(project: string): string {
   return createHash('sha256').update(project).digest('hex').slice(0, 16);
 }
 
+// Every field that leaves the machine is listed here, and the README's Privacy
+// section mirrors it. `pushedCommits` is deliberately not among them: it is a
+// local count, for the endcard and `vibe status`, and the leaderboard has no
+// use for it.
 function buildPayload(s: Session): Record<string, unknown> {
   return {
     id: s.id,

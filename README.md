@@ -135,6 +135,37 @@ Vibetime wraps any AI CLI. To track a tool not listed above:
 vibe config add-tool aider
 ```
 
+## Counting pushes (opt-in)
+
+Commits are cheap; getting them out of the machine is the part that counts. Turn this on and every session also records how many of its commits reached a remote:
+
+```
+vibe config set countPushes on
+```
+
+```
+╭─────────────────────────────────────────────╮
+│  ◆ vibe  ·  api  ·  2h 14m                  │
+├─────────────────────────────────────────────┤
+│                                             │
+│  3 commits  ·  +847 −231  ·  12 files       │
+│  2 of 3 pushed                              │
+│                                             │
+│  ████████░░  shipped  ✦                     │
+│                                             │
+╰─────────────────────────────────────────────╯
+```
+
+`vibe status` totals the same number across today's sessions. Off by default; `vibe config set countPushes off` stops the counting.
+
+**How the count is taken.** Pushing updates the remote-tracking ref in your own repo, so vibetime can tell what went out by asking git which of the session's commits are reachable from `refs/remotes/*` — `git rev-list --count <range> --not --remotes`, the unpushed tail, subtracted from the session's commits. That means:
+
+- **No network.** Nothing is fetched, no remote is contacted, nothing is asked of GitHub. It is the same local ref database `git status` reads to tell you you're 2 ahead.
+- **No names.** It reads two integers. Not the remote's URL, not the branch, not a sha, not a commit message.
+- **Counts only, and they stay here.** The number is stored in `~/.vibe/` and shown on your own endcard. It is **not** submitted to the leaderboard, signed in or not, and it does not affect your tier or your ranking — `shipped` still means commits plus meaningful changes.
+
+Push from a worktree, several repos at once, or long after the session ended (within the 30-minute grace window) and it still counts. A repo with no remote, or a push straight to a URL rather than a configured remote, leaves no tracking ref behind and so counts as nothing pushed.
+
 ## Commands
 
 ```
@@ -147,6 +178,7 @@ vibe logout                  sign out of the leaderboard
 vibe leaderboard             ships, this week
 vibe config show             current settings
 vibe config set handle <name> set your @handle (shown on share cards)
+vibe config set countPushes on   count commits that reached a remote (local only)
 vibe config add-tool <name>  track a new AI CLI tool
 vibe hooks install           track Claude Code, Codex, and Cursor Desktop sessions
 vibe hooks uninstall         stop tracking Desktop sessions
@@ -168,7 +200,7 @@ npm uninstall -g vibetime-cli
 
 Vibetime has no telemetry and no account by default. Everything stays on your machine unless you opt in to the leaderboard with `vibe login`.
 
-It reads **git metadata only** — commit counts, line counts, file counts. It never reads file contents, environment variables, API keys, or anything you type into the wrapped tool. The AI CLI's stdin/stdout are passed straight through via `spawn` with `stdio: 'inherit'`.
+It reads **git metadata only** — commit counts, line counts, file counts, and, if you switch it on, how many of those commits a remote already has ([counting pushes](#counting-pushes-opt-in) — a local ref lookup, never submitted). It never reads file contents, environment variables, API keys, or anything you type into the wrapped tool. The AI CLI's stdin/stdout are passed straight through via `spawn` with `stdio: 'inherit'`.
 
 The Claude Code, Codex, and Cursor Desktop hooks are held to the same standard: they read only the session id and working directory from the hook payload — never the transcript, your prompts, or the model's output — and derive the same git metadata from there.
 

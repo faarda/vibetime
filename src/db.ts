@@ -19,6 +19,10 @@ export interface Session {
   filesTouched: number;
   momentum: MomentumTier;
   exitCode: number;
+  // How many of `commits` had reached a remote when the session was last
+  // measured. Only written while countPushes is on, and never submitted — it
+  // stays in ~/.vibe. Absent means "not counted", which is not the same as 0.
+  pushedCommits?: number;
   lastActivityAt?: string;
   submittedAt?: string;
   // HEAD sha when the session started. Hook-tracked sessions (Claude Code Desktop)

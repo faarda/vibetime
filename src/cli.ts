@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import { getSessions } from './db.js';
 import { refreshAndReap } from './rescore.js';
-import { readConfig, writeConfig, addTool, removeTool, setInstallOptOut } from './config.js';
+import { readConfig, writeConfig, addTool, removeTool, setInstallOptOut, parseBoolValue } from './config.js';
 import { renderStatus, renderLog, renderLeaderboard } from './render.js';
 import { renderTerminalCard, writeHtmlCard } from './share.js';
 import { wrapTool } from './wrap.js';
@@ -236,8 +236,10 @@ configCmd
   .description('set a config value')
   .action((key: string, value: string) => {
     const config = readConfig();
+    let shown = value;
     if (key === 'handle') {
       config.handle = value;
+      shown = `@${value}`;
     } else if (key === 'thresholdLines' || key === 'thresholdFiles') {
       const num = parseInt(value, 10);
       if (isNaN(num)) {
@@ -245,12 +247,25 @@ configCmd
         return;
       }
       config[key] = num;
+    } else if (key === 'countPushes') {
+      const on = parseBoolValue(value);
+      if (on === null) {
+        console.log(`\n  ${RED('✗')} ${key} must be on or off\n`);
+        return;
+      }
+      config.countPushes = on;
+      shown = on ? 'on' : 'off';
     } else {
       console.log(`\n  unknown config key: ${key}\n`);
       return;
     }
     writeConfig(config);
-    console.log(`\n  ${key} updated to ${key === 'handle' ? '@' : ''}${value}\n`);
+    console.log(`\n  ${key} updated to ${shown}\n`);
+    if (key === 'countPushes') {
+      console.log(config.countPushes
+        ? `  sessions from here on show how many of their commits reached a remote.\n  read locally from git, never submitted.\n`
+        : `  push counting off. counts already recorded stay in ~/.vibe.\n`);
+    }
   });
 
 configCmd
@@ -276,6 +291,7 @@ configCmd
     console.log(`  handle:         ${config.handle || '(not set)'}`);
     console.log(`  thresholdLines: ${config.thresholdLines}`);
     console.log(`  thresholdFiles: ${config.thresholdFiles}`);
+    console.log(`  countPushes:    ${config.countPushes ? 'on' : 'off'}`);
     console.log();
   });
 

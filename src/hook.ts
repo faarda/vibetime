@@ -74,15 +74,15 @@ function activeSecondsSince(lastActivityAt: string | undefined, startedAt: strin
 // What the session's repos show now, or null when they can't be measured — a
 // moved or deleted repo reads as an all-zero diff (git failures return empty
 // output), and a zero must never overwrite real recorded stats on a revival.
-function diffFor(session: Session, cwd: string): GitDiffStats | null {
+function diffFor(session: Session, cwd: string, countPushes = false): GitDiffStats | null {
   if (session.repos?.length) {
     const alive = session.repos.filter((r) => existsSync(r.path));
-    return alive.length ? getReposDiffStats(alive) : null;
+    return alive.length ? getReposDiffStats(alive, countPushes) : null;
   }
   // Fallback for sessions opened by an older CLI, which recorded a single
   // baseline sha against the session cwd.
   if (!session.startSha || !isGitRepo(cwd)) return null;
-  return getDiffStats(session.startSha, getHeadSha(cwd), cwd);
+  return getDiffStats(session.startSha, getHeadSha(cwd), cwd, countPushes);
 }
 
 // A finalized hook session must come back to life when later events arrive for
@@ -213,9 +213,9 @@ async function onActivity(sessionId: string, cwd: string): Promise<void> {
   // Refresh git stats on revival (to recover work shipped while closed) and
   // otherwise only past the throttle window.
   if (reopen || gap >= GIT_REFRESH_MS) {
-    const stats = diffFor(session, cwd);
+    const config = readConfig();
+    const stats = diffFor(session, cwd, config.countPushes === true);
     if (stats) {
-      const config = readConfig();
       Object.assign(updates, stats);
       updates.momentum = scoreSession({ ...stats, exitCode: -1 }, config);
       Object.assign(updates, trackShipEvents(session, stats, config, now) ?? {});
@@ -235,8 +235,8 @@ async function onSessionEnd(sessionId: string, cwd: string): Promise<void> {
   const reopen = reopenKind(session, now);
   if (session.exitCode !== -1 && !reopen) return; // finalized — stale events can't revive it
 
-  const stats = diffFor(session, cwd);
   const config = readConfig();
+  const stats = diffFor(session, cwd, config.countPushes === true);
   const updates: Partial<Session> = {
     endedAt: new Date(now).toISOString(),
     durationSeconds: session.durationSeconds + (reopen === 'reaped' ? 0 : activeSecondsSince(session.lastActivityAt, session.startedAt, now)),

@@ -1,5 +1,5 @@
 import { getSessions, updateSession, reapOrphanedSessions, INACTIVITY_TIMEOUT_MS, type Session } from './db.js';
-import { getReposDiffStats } from './git.js';
+import { getReposDiffStats, type GitDiffStats } from './git.js';
 import { readConfig } from './config.js';
 import { scoreSession, trackShipEvents } from './score.js';
 
@@ -8,12 +8,17 @@ import { scoreSession, trackShipEvents } from './score.js';
 // to finish. The window matches the inactivity timeout used everywhere else.
 const GRACE_MS = INACTIVITY_TIMEOUT_MS;
 
-function statsChanged(session: Session, stats: { commits: number; linesAdded: number; linesRemoved: number; filesTouched: number }): boolean {
+function statsChanged(session: Session, stats: GitDiffStats): boolean {
   return (
     session.commits !== stats.commits ||
     session.linesAdded !== stats.linesAdded ||
     session.linesRemoved !== stats.linesRemoved ||
-    session.filesTouched !== stats.filesTouched
+    session.filesTouched !== stats.filesTouched ||
+    // Only when counting is on: with it off the field is absent, and comparing
+    // that against a count recorded while it was on would rewrite the session
+    // on every pass. This is the case that makes the grace window matter — you
+    // commit in the session and push a minute after closing it.
+    (stats.pushedCommits !== undefined && session.pushedCommits !== stats.pushedCommits)
   );
 }
 
@@ -61,7 +66,7 @@ export async function refreshRecentSessions(): Promise<void> {
       if (ownedByAnotherSession(session, all)) continue;
     }
 
-    const stats = getReposDiffStats(session.repos);
+    const stats = getReposDiffStats(session.repos, config.countPushes === true);
     if (!statsChanged(session, stats)) continue;
 
     await updateSession(session.id, {

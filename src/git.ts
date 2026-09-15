@@ -199,6 +199,10 @@ export interface GitDiffStats {
   linesAdded: number;
   linesRemoved: number;
   filesTouched: number;
+  // How many of `commits` a remote already has. Present only when push
+  // counting is switched on (config.countPushes) — absent, not zero, when it
+  // is off, so "not counted" never reads as "nothing pushed".
+  pushedCommits?: number;
 }
 
 function parseNumstat(numstat: string) {
@@ -246,8 +250,24 @@ function checkoutsOf(repo: RepoBaseline): { path: string; head: string; startSha
   return trees.map((t) => ({ ...t, startSha: baselines.get(t.path) ?? repo.startSha }));
 }
 
-export function getDiffStats(fromSha: string, toSha: string, cwd?: string): GitDiffStats {
+// Of the commits in `range`, how many a remote already has.
+//
+// `--not --remotes` drops everything reachable from a remote-tracking ref, so
+// what survives is the unpushed tail and the rest went out. Git updates those
+// refs locally as part of a push, so the count moves the moment you push, with
+// no network call, no fetch, and nothing asked of the remote. It reads two
+// integers out of git: no remote name, no branch name, no sha, no message.
+// A failed git call returns '' and so counts nothing as pushed.
+function pushedOf(range: string, commits: number, repoPath?: string): number {
+  if (commits <= 0) return 0;
+  const unpushed = parseInt(run(`git rev-list --count ${range} --not --remotes`, repoPath), 10);
+  if (Number.isNaN(unpushed)) return 0;
+  return Math.max(commits - unpushed, 0);
+}
+
+export function getDiffStats(fromSha: string, toSha: string, cwd?: string, countPushed = false): GitDiffStats {
   let commits = 0;
+  let pushedCommits = 0;
   let linesAdded = 0;
   let linesRemoved = 0;
   const allFiles = new Set<string>();
@@ -255,6 +275,7 @@ export function getDiffStats(fromSha: string, toSha: string, cwd?: string): GitD
   if (isSha(fromSha) && isSha(toSha) && fromSha !== toSha) {
     const logCount = run(`git rev-list --count ${fromSha}..${toSha}`, cwd);
     commits = parseInt(logCount, 10) || 0;
+    if (countPushed) pushedCommits = pushedOf(`${fromSha}..${toSha}`, commits, cwd);
 
     const committed = parseNumstat(run(`git diff --numstat ${fromSha}..${toSha}`, cwd));
     linesAdded += committed.added;
@@ -270,11 +291,12 @@ export function getDiffStats(fromSha: string, toSha: string, cwd?: string): GitD
   linesRemoved += uncommitted.removed;
   for (const f of uncommitted.files) allFiles.add(f);
 
-  return { commits, linesAdded, linesRemoved, filesTouched: allFiles.size };
+  return { commits, linesAdded, linesRemoved, filesTouched: allFiles.size, ...(countPushed ? { pushedCommits } : {}) };
 }
 
 interface CommittedStats {
   commits: number;
+  pushedCommits: number;
   linesAdded: number;
   linesRemoved: number;
   files: Set<string>;
@@ -286,30 +308,32 @@ interface CommittedStats {
 // reachable from the worktree's tip and from no baseline. Merging that worktree
 // back mid-session doesn't double count either — the commits land in the same
 // reachability set whether one tip or two can see them.
-function committedStats(checkouts: { path: string; head: string; startSha: string }[], repoPath: string): CommittedStats {
+function committedStats(checkouts: { path: string; head: string; startSha: string }[], repoPath: string, countPushed: boolean): CommittedStats {
   const bases = [...new Set(checkouts.map((c) => c.startSha).filter(isSha))];
   const tips = [...new Set(checkouts.map((c) => c.head).filter(isSha))].filter((t) => !bases.includes(t));
   if (bases.length === 0 || tips.length === 0) {
-    return { commits: 0, linesAdded: 0, linesRemoved: 0, files: new Set() };
+    return { commits: 0, pushedCommits: 0, linesAdded: 0, linesRemoved: 0, files: new Set() };
   }
 
   const range = [...bases.map((b) => `^${b}`), ...tips].join(' ');
   const commits = parseInt(run(`git rev-list --count ${range}`, repoPath), 10) || 0;
+  const pushedCommits = countPushed ? pushedOf(range, commits, repoPath) : 0;
   // Per-commit numstat rather than a net range diff: a range diff needs a single
   // tip, and summing one per tip would count shared history twice. Merge commits
   // report no numstat, so merged work is counted where it was written.
   const { added, removed, files } = parseNumstat(run(`git log --format= --numstat ${range}`, repoPath));
-  return { commits, linesAdded: added, linesRemoved: removed, files };
+  return { commits, pushedCommits, linesAdded: added, linesRemoved: removed, files };
 }
 
 // Stats for every repo the session watches, summed. Files are counted per repo
 // and added up — two repos can hold the same relative path without it being the
 // same file, so there is nothing to de-duplicate across them.
-export function getReposDiffStats(repos: RepoBaseline[]): GitDiffStats {
+export function getReposDiffStats(repos: RepoBaseline[], countPushed = false): GitDiffStats {
   const total: GitDiffStats = { commits: 0, linesAdded: 0, linesRemoved: 0, filesTouched: 0 };
+  let pushedCommits = 0;
   for (const repo of repos) {
     const checkouts = checkoutsOf(repo);
-    const committed = committedStats(checkouts, repo.path);
+    const committed = committedStats(checkouts, repo.path, countPushed);
     let linesAdded = committed.linesAdded;
     let linesRemoved = committed.linesRemoved;
     // A file already touched by a commit this session can also be sitting
@@ -324,9 +348,10 @@ export function getReposDiffStats(repos: RepoBaseline[]): GitDiffStats {
       for (const f of uncommitted.files) files.add(f);
     }
     total.commits += committed.commits;
+    pushedCommits += committed.pushedCommits;
     total.linesAdded += linesAdded;
     total.linesRemoved += linesRemoved;
     total.filesTouched += files.size;
   }
-  return total;
+  return countPushed ? { ...total, pushedCommits } : total;
 }
