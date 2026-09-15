@@ -4,8 +4,9 @@ import { isGitRepo, getHeadSha, getDiffStats, getReposDiffStats, baselineRepos, 
 import { refreshAndReap } from './rescore.js';
 import { readConfig } from './config.js';
 import { scoreSession, trackShipEvents } from './score.js';
-import { flushPendingSubmissions } from './submit.js';
+import { flushPendingSubmissions, submitInProgress } from './submit.js';
 import { reconcileInstall } from './reconcile.js';
+import { TUNABLES } from './remote-config.js';
 
 // Claude Code, Codex, and Cursor deliver a JSON payload on stdin to every hook
 // command. We read only the fields below — never the transcript, prompts, or
@@ -27,6 +28,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Skip a git diff on rapid-fire activity events (e.g. bursts of parallel tool
 // calls); duration still accumulates, only the git stats refresh is throttled.
 const GIT_REFRESH_MS = 15_000;
+
+const IN_PROGRESS_SUBMIT_INTERVAL_MS = TUNABLES.inProgressSubmitIntervalMs;
+// Tighter than the wrapper's budget: this runs inside the editor's hook
+// timeout, so a slow network must never be felt as a stalled app.
+const PROGRESS_SUBMIT_BUDGET_MS = 1200;
 
 type HookEvent = 'session-start' | 'activity' | 'session-end';
 export type HookTool = 'claude' | 'codex' | 'cursor';
@@ -225,6 +231,36 @@ async function onActivity(sessionId: string, cwd: string): Promise<void> {
   try {
     await updateSession(sessionId, updates);
   } catch {}
+
+  await submitProgress({ ...session, ...updates });
+}
+
+// Desktop sessions used to reach the leaderboard only when they ended. A five
+// hour session showed nothing until it closed, and could never score more than
+// one ship a day, because the server saw a single delta and credits one ship
+// per delta. Terminal sessions have always reported every few minutes, so the
+// same work counted differently depending on which one you used.
+//
+// Mirrors the wrapper: same interval, same unchanged-payload guard, marked
+// before sending so a failure waits for the next window instead of retrying in
+// a loop.
+async function submitProgress(session: Session): Promise<void> {
+  if (session.exitCode !== -1 || session.momentum !== 'shipped') return;
+
+  const signature = `${session.commits}:${session.linesAdded}:${session.linesRemoved}:${session.filesTouched}:${(session.shipEvents ?? []).length}`;
+  if (signature === session.lastProgressSignature) return;
+
+  const last = session.lastProgressSubmitAt ? Date.parse(session.lastProgressSubmitAt) : 0;
+  if (last && Date.now() - last < IN_PROGRESS_SUBMIT_INTERVAL_MS) return;
+
+  try {
+    await updateSession(session.id, {
+      lastProgressSubmitAt: new Date().toISOString(),
+      lastProgressSignature: signature,
+    });
+  } catch { return; }
+
+  await submitInProgress(session, PROGRESS_SUBMIT_BUDGET_MS).catch(() => {});
 }
 
 async function onSessionEnd(sessionId: string, cwd: string): Promise<void> {
