@@ -3,6 +3,7 @@ import type { Session } from './db.js';
 import { TIER_FILLED, type MomentumTier } from './score.js';
 import { PURPLE } from './colors.js';
 import type { LeaderboardEntry } from './leaderboard.js';
+import type { CommitTotals } from './ledger.js';
 
 const DIM = chalk.hex('#444444');
 const WIDTH = 47;
@@ -86,7 +87,18 @@ export function renderEndcard(session: Session): string {
   ].join('\n');
 }
 
-export function renderStatus(sessions: Session[], signedOut = false): string {
+// What git says you committed today, regardless of what the sessions caught.
+// Rendered wherever sessions are, because the whole point is to be readable
+// side by side with them: when the two disagree, this is the honest one.
+function ledgerLine(ledger: CommitTotals): string {
+  const commits = `${ledger.total} commit${ledger.total === 1 ? '' : 's'} today`;
+  const where = ledger.repos.length === 1
+    ? ledger.repos[0].name
+    : `${ledger.repos.length} repos`;
+  return `  ${commits}  ${DIM('·')}  ${DIM(where)}  ${DIM('· from git')}`;
+}
+
+export function renderStatus(sessions: Session[], signedOut = false, ledger?: CommitTotals): string {
   const now = new Date();
   const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
@@ -96,6 +108,20 @@ export function renderStatus(sessions: Session[], signedOut = false): string {
   const header = `${PURPLE('◆')} vibe  ·  today  ·  ${dateStr}`;
 
   if (sessions.length === 0) {
+    if (ledger && ledger.total > 0) {
+      // Committed today with nothing tracking it — a tool without hooks, or
+      // hooks that missed. Say what git has rather than "no sessions today",
+      // which reads as "you did nothing".
+      return [
+        '', header, '',
+        '  no sessions tracked today, but git says otherwise:', '',
+        ledgerLine(ledger),
+        '',
+        `  ${DIM('see where: vibe commits')}`,
+        '',
+        ...(signedOut ? [renderSignedOutNotice()] : []),
+      ].join('\n');
+    }
     return `\n${header}\n\n  no sessions today. start a vibe coding session to begin tracking.\n`;
   }
 
@@ -128,9 +154,68 @@ export function renderStatus(sessions: Session[], signedOut = false): string {
     '',
     `  ${DIM('─'.repeat(37))}`,
     summary,
+    ...(ledger && ledger.total > 0 ? [ledgerLine(ledger)] : []),
     '',
     ...(signedOut ? [renderSignedOutNotice()] : []),
   ].join('\n');
+}
+
+// The full breakdown behind that line: `vibe commits`.
+export function renderCommits(ledger: CommitTotals, label: string, hasRoots: boolean): string {
+  const header = `${PURPLE('◆')} vibe  ·  commits  ·  ${label}`;
+
+  if (ledger.total === 0) {
+    const body = ledger.reposKnown === 0
+      ? [
+          '  no repos to look in yet.',
+          '',
+          `  point vibe at where your code lives:  ${PURPLE('vibe config add-root ~/dev')}`,
+        ]
+      : [`  no commits ${label}, across ${ledger.reposKnown} repo${ledger.reposKnown === 1 ? '' : 's'}.`];
+    return ['', header, '', ...body, ...otherAuthorsBlock(ledger), '', ...(hasRoots ? [] : [rootHint()]), ''].join('\n');
+  }
+
+  const nameWidth = Math.max(...ledger.repos.map((r) => truncateProject(r.name).length));
+  const rows = ledger.repos.map((r) => {
+    const name = truncateProject(r.name).padEnd(nameWidth);
+    return `  ${name}   ${PURPLE(String(r.commits).padStart(3))}`;
+  });
+
+  const summary = `  ${ledger.total} commit${ledger.total === 1 ? '' : 's'} ${label}  ${DIM('·')}  ${ledger.repos.length} of ${ledger.reposKnown} repos`;
+
+  return [
+    '',
+    header,
+    '',
+    ...rows,
+    '',
+    `  ${DIM('─'.repeat(37))}`,
+    summary,
+    ...otherAuthorsBlock(ledger),
+    '',
+    ...(hasRoots ? [] : [rootHint(), '']),
+  ].join('\n');
+}
+
+// The answer to "I committed today, why does this say nothing". Nearly always
+// a second identity rather than anything lost, so name the addresses and the
+// one command that fixes it.
+function otherAuthorsBlock(ledger: CommitTotals): string[] {
+  const others = (ledger.others ?? []).slice(0, 3);
+  if (others.length === 0) return [];
+
+  const width = Math.max(...others.map((o) => o.email.length));
+  return [
+    '',
+    `  ${DIM('committed here, but not as you:')}`,
+    ...others.map((o) => `    ${DIM(o.email.padEnd(width))}   ${DIM(String(o.commits))}`),
+    '',
+    `  ${DIM('if one of those is you:')} ${PURPLE(`vibe config add-email ${others[0].email}`)}`,
+  ];
+}
+
+function rootHint(): string {
+  return `  ${DIM('counting only repos vibe has seen in a session.')}\n  ${DIM('add the rest:')} ${PURPLE('vibe config add-root ~/dev')}`;
 }
 
 // Shown after the endcard and under `vibe status` when the server rejected the

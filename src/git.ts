@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
@@ -15,6 +15,17 @@ const MAX_DISCOVERED_REPOS = 10;
 function run(cmd: string, cwd?: string) {
   try {
     return execSync(cmd, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: GIT_TIMEOUT_MS }).trim();
+  } catch {
+    return '';
+  }
+}
+
+// Argument-array form, for commands carrying values that aren't shas — an
+// author's email, a date, a path. No shell is involved, so nothing in the
+// value can be read as syntax, on any platform.
+function runGit(args: string[], cwd?: string): string {
+  try {
+    return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: GIT_TIMEOUT_MS }).trim();
   } catch {
     return '';
   }
@@ -136,7 +147,7 @@ export function discoverRepos(cwd: string): string[] {
 // top-level entry, and again inside the repo's own worktree list. Keep one
 // entry per repo, preferring the main checkout — its worktree list enumerates
 // every linked checkout, a linked worktree's list of itself does not.
-function dedupeByRepo(candidates: string[]): string[] {
+export function dedupeByRepo(candidates: string[]): string[] {
   const chosen = new Map<string, string>(); // git-common-dir -> chosen path
   const order: string[] = [];
   for (const path of candidates) {
@@ -354,4 +365,131 @@ export function getReposDiffStats(repos: RepoBaseline[], countPushed = false): G
     total.filesTouched += files.size;
   }
   return countPushed ? { ...total, pushedCommits } : total;
+}
+
+// ---------------------------------------------------------------------------
+// Reading commits straight out of a repo, with no session involved.
+//
+// Everything above measures a session: a baseline sha taken when a session
+// opened, and the delta from it. That only works when a session was captured.
+// When the editor's hooks miss one — a layout they don't recognise, an end
+// event they never send — the work is invisible even though git has it. What
+// follows answers the other question: on this day, what did this person
+// actually commit, whatever was or wasn't watching at the time.
+// ---------------------------------------------------------------------------
+
+// The email git will stamp on a commit made here. Per repo, since a work
+// checkout and a personal one routinely disagree, with the global setting as
+// the fallback git itself would use.
+export function getAuthorEmail(repoPath: string): string {
+  return runGit(['config', '--get', 'user.email'], repoPath);
+}
+
+export interface AuthoredCommit {
+  sha: string;
+  authoredAt: number;
+}
+
+// Commits by `email` authored in [fromMs, toMs), across every ref.
+//
+// --all because agent work routinely lands on a branch that is not the one
+// checked out, and a commit nobody has merged yet is still a commit you made.
+// The walk is bounded by --since on the commit date, which can only be at or
+// after the author date, so nothing authored inside the window is missed; the
+// exact window is then applied to the AUTHOR date, so a rebase today does not
+// drag last week's commits into today's count.
+export function commitsAuthoredBetween(repoPath: string, emails: string[], fromMs: number, toMs: number): AuthoredCommit[] {
+  const authors = emails.filter(Boolean);
+  if (authors.length === 0) return [];
+  const out = runGit([
+    // Git renders an author as `Name <email>`, so the angle brackets anchor
+    // both ends of the match: a bare --author=me@x.com is a substring search
+    // that would also claim notme@x.com's commits as yours. Several --author
+    // are OR'd, which is how a second identity gets counted.
+    'log', '--all', ...authors.map((e) => `--author=<${e}>`), '--fixed-strings',
+    `--since=${new Date(fromMs).toISOString()}`,
+    '--format=%H %aI',
+  ], repoPath);
+  if (!out) return [];
+
+  const seen = new Set<string>();
+  const commits: AuthoredCommit[] = [];
+  for (const line of out.split('\n')) {
+    const [sha, authored] = line.split(' ');
+    // --all lists a commit once even when several refs reach it, but a repo
+    // with a linked worktree can surface the same sha from two ref namespaces.
+    if (!sha || !isSha(sha) || seen.has(sha)) continue;
+    const at = Date.parse(authored ?? '');
+    if (Number.isNaN(at) || at < fromMs || at >= toMs) continue;
+    seen.add(sha);
+    commits.push({ sha, authoredAt: at });
+  }
+  return commits;
+}
+
+// Who else committed here in the window, and how much. This is the answer to
+// "why isn't my work showing up": almost always a second identity — a work
+// address, a GitHub noreply, an agent configured with its own email — rather
+// than anything missing. Only ever run on demand, never on a status poll.
+export function otherAuthorsBetween(repoPath: string, mine: string[], fromMs: number, toMs: number): { email: string; commits: number }[] {
+  const out = runGit([
+    'log', '--all', `--since=${new Date(fromMs).toISOString()}`, '--format=%H %ae %aI',
+  ], repoPath);
+  if (!out) return [];
+
+  const ours = new Set(mine.filter(Boolean).map((e) => e.toLowerCase()));
+  const seen = new Set<string>();
+  const counts = new Map<string, number>();
+  for (const line of out.split('\n')) {
+    const [sha, email, authored] = line.split(' ');
+    if (!sha || !isSha(sha) || !email || seen.has(sha)) continue;
+    const at = Date.parse(authored ?? '');
+    if (Number.isNaN(at) || at < fromMs || at >= toMs) continue;
+    seen.add(sha);
+    if (ours.has(email.toLowerCase())) continue;
+    counts.set(email, (counts.get(email) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([email, commits]) => ({ email, commits }))
+    .sort((a, b) => b.commits - a.commits);
+}
+
+// Bounds for the deep scan. Unlike discoverRepos, which looks one level down
+// from a directory a session was started in, this walks a root the user named
+// on purpose — so it goes deeper, and stops descending as soon as it finds a
+// repo, since the interesting thing is repos, not what is nested inside them.
+const MAX_SCAN_DEPTH = 4;
+const MAX_SCANNED_DIRS = 2_000;
+const MAX_DEEP_REPOS = 200;
+const SKIP_DIRS = new Set(['node_modules', 'vendor', 'target', 'dist', 'build', 'Library', 'Applications']);
+
+export function discoverReposUnder(root: string, maxDepth = MAX_SCAN_DEPTH): string[] {
+  const found: string[] = [];
+  let scanned = 0;
+
+  const walk = (dir: string, depth: number): void => {
+    if (found.length >= MAX_DEEP_REPOS || scanned >= MAX_SCANNED_DIRS) return;
+    scanned++;
+
+    if (existsSync(join(dir, '.git'))) {
+      found.push(dir);
+      return; // a repo's own contents are its business — submodules included
+    }
+    if (depth >= maxDepth) return;
+
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory: skip it, never fail the scan
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
+      walk(join(dir, entry.name), depth + 1);
+    }
+  };
+
+  walk(resolve(root), 0);
+  return dedupeByRepo(found);
 }

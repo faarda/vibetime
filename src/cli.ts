@@ -3,8 +3,9 @@
 import { Command } from 'commander';
 import { getSessions } from './db.js';
 import { refreshAndReap } from './rescore.js';
-import { readConfig, writeConfig, addTool, removeTool, setInstallOptOut, parseBoolValue } from './config.js';
-import { renderStatus, renderLog, renderLeaderboard } from './render.js';
+import { readConfig, writeConfig, addTool, removeTool, setInstallOptOut, parseBoolValue, addRepoRoot, removeRepoRoot, addAuthorEmail, removeAuthorEmail } from './config.js';
+import { commitsToday, commitsBetween, dayCount } from './ledger.js';
+import { renderStatus, renderLog, renderLeaderboard, renderCommits } from './render.js';
 import { renderTerminalCard, writeHtmlCard } from './share.js';
 import { wrapTool } from './wrap.js';
 import { initShellHooks, removeShellHooks } from './init.js';
@@ -75,7 +76,8 @@ async function showStatus(): Promise<void> {
     return false;
   });
 
-  console.log(renderStatus(todaySessions, needsLogin()));
+  // Read straight from git, so a day the hooks missed still shows its work.
+  console.log(renderStatus(todaySessions, needsLogin(), commitsToday()));
 }
 
 // Bare `vibe` is the first thing anyone types after installing, and npm hides
@@ -227,6 +229,20 @@ program
     }
   });
 
+program
+  .command('commits')
+  .description("commits you made today, read from git (no session needed)")
+  .option('--days <n>', 'look back this many days instead of today', '1')
+  .action(async (opts: { days: string }) => {
+    const days = Math.max(parseInt(opts.days, 10) || 1, 1);
+    const { fromMs, toMs } = dayCount(days);
+    const ledger = days === 1
+      ? commitsToday({ explain: true })
+      : commitsBetween(fromMs, toMs, { explain: true });
+    const label = days === 1 ? 'today' : `last ${days} days`;
+    console.log(renderCommits(ledger, label, (readConfig().repoRoots ?? []).length > 0));
+  });
+
 const configCmd = program
   .command('config')
   .description('manage configuration');
@@ -269,6 +285,46 @@ configCmd
   });
 
 configCmd
+  .command('add-root <path>')
+  .description('look for repos under this directory when counting commits')
+  .action((path: string) => {
+    const { added, resolved } = addRepoRoot(path);
+    console.log(added
+      ? `\n  ${PURPLE('◆')} counting commits under ${resolved}\n`
+      : `\n  ${PURPLE('◆')} ${resolved} is already being counted\n`);
+  });
+
+configCmd
+  .command('remove-root <path>')
+  .description('stop looking for repos under this directory')
+  .action((path: string) => {
+    const { removed, resolved } = removeRepoRoot(path);
+    console.log(removed
+      ? `\n  ${PURPLE('◆')} no longer counting commits under ${resolved}\n`
+      : `\n  ${PURPLE('◆')} ${resolved} was not being counted\n`);
+  });
+
+configCmd
+  .command('add-email <email>')
+  .description('another address you commit under, counted as you')
+  .action((email: string) => {
+    const { added, email: resolved } = addAuthorEmail(email);
+    console.log(added
+      ? `\n  ${PURPLE('◆')} commits authored by ${resolved} now count as yours\n`
+      : `\n  ${PURPLE('◆')} ${resolved} already counts as yours\n`);
+  });
+
+configCmd
+  .command('remove-email <email>')
+  .description('stop counting an address as you')
+  .action((email: string) => {
+    const { removed, email: resolved } = removeAuthorEmail(email);
+    console.log(removed
+      ? `\n  ${PURPLE('◆')} ${resolved} no longer counts as yours\n`
+      : `\n  ${PURPLE('◆')} ${resolved} was not counted as yours\n`);
+  });
+
+configCmd
   .command('add-tool <name>')
   .description('track a new AI CLI tool')
   .action(async (name: string) => {
@@ -292,6 +348,10 @@ configCmd
     console.log(`  thresholdLines: ${config.thresholdLines}`);
     console.log(`  thresholdFiles: ${config.thresholdFiles}`);
     console.log(`  countPushes:    ${config.countPushes ? 'on' : 'off'}`);
+    const roots = config.repoRoots ?? [];
+    console.log(`  repoRoots:      ${roots.length ? roots.join('\n                  ') : '(none)'}`);
+    const emails = config.authorEmails ?? [];
+    console.log(`  authorEmails:   ${emails.length ? emails.join('\n                  ') : "(each repo's own)"}`);
     console.log();
   });
 

@@ -135,6 +135,54 @@ Vibetime wraps any AI CLI. To track a tool not listed above:
 vibe config add-tool aider
 ```
 
+## Commits you actually made
+
+Everything above is measured *per session*: vibetime notes where your repos stand when a session opens and what changed by the time it closes. That's the better number — when a session is captured. But a session can be missed. An editor's hooks don't fire, a workspace layout isn't recognised, a session never reports that it ended. When that happens your work isn't mis-counted, it's **absent** — even though the commits are sitting right there in git.
+
+So there's a second way to count, which needs no session at all:
+
+```
+vibe commits
+```
+
+```
+◆ vibe  ·  commits  ·  today
+
+  api         7
+  web         3
+  tooling     2
+
+  ─────────────────────────────────────
+  12 commits today  ·  3 of 18 repos
+```
+
+It reads your commits straight out of git — every repo it knows about, every branch, whether or not anything was watching when you made them. `vibe status` shows the same total under your sessions, so when the two disagree you can see it. Commit all day in Cursor with the hooks broken and `vibe status` will still tell you what you did.
+
+**Tell it where your code is.** Sessions only know the repos they were opened in, and the layouts most likely to go uncounted are exactly the ones that never produced a session to remember them by. So point it at your code:
+
+```
+vibe config add-root ~/dev
+```
+
+It walks up to four levels down, so `~/dev/clients/acme/api` is found, and stops at each repo rather than descending into it.
+
+**Tell it who you are, if it can't tell.** Only commits *you* authored count — a colleague's work, and anything a `git fetch` dragged in, never becomes yours. "You" is whatever email git would stamp on a commit in that repo, which handles a work checkout and a personal one without any setup. If you commit under more than one address, add the others:
+
+```
+vibe config add-email me@company.com
+```
+
+You rarely have to guess. When `vibe commits` finds commits it can't attribute to you, it says so and names them:
+
+```
+  committed here, but not as you:
+    me@company.com   4
+
+  if one of those is you: vibe config add-email me@company.com
+```
+
+Counting is by distinct commit, so nothing is ever counted twice, no matter how many sessions also saw it. Dates use the **author** date, so rebasing today doesn't drag last week's work into today. `vibe commits --days 7` widens the window.
+
 ## Counting pushes (opt-in)
 
 Commits are cheap; getting them out of the machine is the part that counts. Turn this on and every session also records how many of its commits reached a remote:
@@ -170,6 +218,8 @@ Push from a worktree, several repos at once, or long after the session ended (wi
 
 ```
 vibe status                  today's sessions (includes active sessions)
+vibe commits                 commits you made today, straight from git
+vibe commits --days 7        the same over a longer window
 vibe log                     last 20 sessions
 vibe share                   weekly summary card
 vibe share --html            shareable HTML card
@@ -179,6 +229,8 @@ vibe leaderboard             ships, this week
 vibe config show             current settings
 vibe config set handle <name> set your @handle (shown on share cards)
 vibe config set countPushes on   count commits that reached a remote (local only)
+vibe config add-root <path>  look for repos under here when counting commits
+vibe config add-email <addr> another address you commit under
 vibe config add-tool <name>  track a new AI CLI tool
 vibe hooks install           track Claude Code, Codex, and Cursor Desktop sessions
 vibe hooks uninstall         stop tracking Desktop sessions
@@ -199,6 +251,8 @@ npm uninstall -g vibetime-cli
 ## Privacy
 
 Vibetime has no telemetry and no account by default. Everything stays on your machine unless you opt in to the leaderboard with `vibe login`.
+
+The commit count above is held to the same standard: it reads commit hashes, author dates and author emails to work out which commits are yours, and never a commit message, a diff, or a file. Your own address stays in `~/.vibe/config.json` and is not submitted.
 
 It reads **git metadata only** — commit counts, line counts, file counts, and, if you switch it on, how many of those commits a remote already has ([counting pushes](#counting-pushes-opt-in) — a local ref lookup, never submitted). It never reads file contents, environment variables, API keys, or anything you type into the wrapped tool. The AI CLI's stdin/stdout are passed straight through via `spawn` with `stdio: 'inherit'`.
 

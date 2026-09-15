@@ -23,6 +23,15 @@ export interface VibeConfig {
   // some people would rather not have kept even locally. See countPushes in
   // the README for what it does and doesn't read.
   countPushes?: boolean;
+  // Directories to look for repos under, for the session-independent commit
+  // count. Sessions only know the repos they were opened in; these are the
+  // ones you told vibe about, so work an editor's hooks missed entirely still
+  // has somewhere to be counted from.
+  repoRoots?: string[];
+  // Extra addresses that are also you. Each repo's own user.email is used
+  // automatically; these cover the rest — a work address, a GitHub noreply,
+  // an old address you have since changed.
+  authorEmails?: string[];
 }
 
 // Overridable so tests can run the full session flow against a scratch dir
@@ -70,6 +79,48 @@ export function parseBoolValue(value: string): boolean | null {
   if (['on', 'true', 'yes', '1'].includes(v)) return true;
   if (['off', 'false', 'no', '0'].includes(v)) return false;
   return null;
+}
+
+// Roots are stored absolute and deduped: `vibe commits` walks them on every
+// run, and the same tree under two spellings would be scanned twice.
+export function addRepoRoot(path: string): { added: boolean; resolved: string } {
+  const config = readConfig();
+  const target = resolve(path.replace(/^~(?=$|\/)/, homedir()));
+  const roots = config.repoRoots ?? [];
+  if (roots.includes(target)) return { added: false, resolved: target };
+  config.repoRoots = [...roots, target];
+  writeConfig(config);
+  return { added: true, resolved: target };
+}
+
+export function removeRepoRoot(path: string): { removed: boolean; resolved: string } {
+  const config = readConfig();
+  const target = resolve(path.replace(/^~(?=$|\/)/, homedir()));
+  const roots = config.repoRoots ?? [];
+  if (!roots.includes(target)) return { removed: false, resolved: target };
+  config.repoRoots = roots.filter((r) => r !== target);
+  writeConfig(config);
+  return { removed: true, resolved: target };
+}
+
+export function addAuthorEmail(email: string): { added: boolean; email: string } {
+  const config = readConfig();
+  const target = email.trim().toLowerCase();
+  const emails = config.authorEmails ?? [];
+  if (emails.includes(target)) return { added: false, email: target };
+  config.authorEmails = [...emails, target];
+  writeConfig(config);
+  return { added: true, email: target };
+}
+
+export function removeAuthorEmail(email: string): { removed: boolean; email: string } {
+  const config = readConfig();
+  const target = email.trim().toLowerCase();
+  const emails = config.authorEmails ?? [];
+  if (!emails.includes(target)) return { removed: false, email: target };
+  config.authorEmails = emails.filter((e) => e !== target);
+  writeConfig(config);
+  return { removed: true, email: target };
 }
 
 export function getHandle(): string {
