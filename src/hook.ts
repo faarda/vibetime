@@ -30,8 +30,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const GIT_REFRESH_MS = 15_000;
 
 const IN_PROGRESS_SUBMIT_INTERVAL_MS = TUNABLES.inProgressSubmitIntervalMs;
-// Tighter than the wrapper's budget: this runs inside the editor's hook
-// timeout, so a slow network must never be felt as a stalled app.
+// Tighter than the wrapper's: this runs inside the editor's hook timeout.
 const PROGRESS_SUBMIT_BUDGET_MS = 1200;
 
 type HookEvent = 'session-start' | 'activity' | 'session-end';
@@ -235,15 +234,10 @@ async function onActivity(sessionId: string, cwd: string): Promise<void> {
   await submitProgress({ ...session, ...updates });
 }
 
-// Desktop sessions used to reach the leaderboard only when they ended. A five
-// hour session showed nothing until it closed, and could never score more than
-// one ship a day, because the server saw a single delta and credits one ship
-// per delta. Terminal sessions have always reported every few minutes, so the
-// same work counted differently depending on which one you used.
-//
-// Mirrors the wrapper: same interval, same unchanged-payload guard, marked
-// before sending so a failure waits for the next window instead of retrying in
-// a loop.
+// Mirrors the wrapper's poller, so a desktop session counts the same as a
+// terminal one: the server credits one ship per delta it receives, and
+// submitting only at session end caps a whole day at one. Marked before
+// sending, so a failure waits for the next window instead of looping.
 async function submitProgress(session: Session): Promise<void> {
   if (session.exitCode !== -1 || session.momentum !== 'shipped') return;
 
