@@ -63,13 +63,14 @@ export const TUNABLES: Tunables = {
   inactivityTimeoutMs: loaded.inactivityTimeoutMs,
 };
 
-// Fire-and-forget refresh for contexts that can afford network (the wrapper at
-// session start). Skips when the cache is fresh; failures leave the cache as
-// is. New values apply to the NEXT process, never mid-session.
-export async function refreshTunables(): Promise<void> {
+// Skips when the cache is fresh; failures leave the cache as is. New values
+// apply to the NEXT process, never mid-session. The wrapper fires and forgets
+// because it outlives the request; a hook process exits immediately, so it
+// awaits this with a budget small enough to sit inside the editor's timeout.
+export async function refreshTunables(timeoutMs = 3000): Promise<void> {
   if (loaded.fetchedAt && Date.now() - Date.parse(loaded.fetchedAt) < STALE_AFTER_MS) return;
   try {
-    const fetched = await request<Partial<Tunables>>('/config', { timeoutMs: 3000 });
+    const fetched = await request<Partial<Tunables>>('/config', { timeoutMs });
     ensureVibeDir();
     writeFileSync(CACHE_PATH, JSON.stringify({
       pollIntervalMs: clamp('pollIntervalMs', fetched.pollIntervalMs),
