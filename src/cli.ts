@@ -75,7 +75,17 @@ async function showStatus(): Promise<void> {
     return false;
   });
 
-  console.log(renderStatus(todaySessions, needsLogin()));
+  console.log(renderStatus(todaySessions, needsLogin(), countPendingSubmissions()));
+}
+
+function countPendingSubmissions(): number {
+  // Same filter the flush uses: ended sessions of at least a minute that the
+  // server hasn't confirmed. When this is non-zero the status output says so,
+  // because flush failures are otherwise completely silent.
+  if (needsLogin()) return 0;
+  return getSessions().filter(
+    (s) => !s.submittedAt && s.exitCode !== -1 && s.durationSeconds >= 60,
+  ).length;
 }
 
 // Bare `vibe` is the first thing anyone types after installing, and npm hides
