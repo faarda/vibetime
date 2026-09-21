@@ -5,6 +5,13 @@ import type { Session } from './db.js';
 import { VIBE_DIR, getHandle, readConfig, promptHandle } from './config.js';
 import { formatDuration, pad, truncateProject } from './render.js';
 import { PURPLE } from './colors.js';
+import { WEB_BASE } from './api.js';
+
+// The card is meant to be screenshotted and posted, so the footer has to send a
+// stranger somewhere that exists. Derived from WEB_BASE rather than written out,
+// because the last hardcoded copy said vibetime.sh, which resolves nowhere.
+// The leaderboard, not a profile: /@handle is a 404, there are no profile pages.
+const SHARE_LINK = `${WEB_BASE.replace(/^https?:\/\//, '')}/leaderboard`;
 
 const PURPLE_MED = chalk.hex('#6D28D9');
 const PURPLE_DARK = chalk.hex('#4C1D95');
@@ -428,8 +435,8 @@ ${topProjectsHtml}
     </div>
   </div>
   <div class="footer">
-    <span>◆ vibetime.sh</span>
-    <span>vibetime.sh/@${safeHandle}</span>
+    <span>◆ vibetime</span>
+    <span>${SHARE_LINK}</span>
   </div>
 </div>
 <button class="copy-btn" id="copyBtn" onclick="copyCard()">copy card</button>

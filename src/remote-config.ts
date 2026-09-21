@@ -38,8 +38,10 @@ function clamp(key: keyof Tunables, value: unknown): number {
 
 // Read once at module load: every consumer (wrapper poller, hook engine,
 // reaper, grace rescore) sees the same values for the life of the process.
-// Hook processes must never fetch — codex gives session-end hooks 3 seconds —
-// so this is a local file read only; refreshTunables() below does the network.
+// This is a local file read only, so it is safe on any path; refreshTunables()
+// below does the network, and a hook may only call it where the event's
+// timeout allows (session-start and activity get 10s, but codex caps
+// session-end at 3s, so that path stays local).
 function load(): Tunables & { fetchedAt?: string } {
   if (!existsSync(CACHE_PATH)) return { ...DEFAULTS };
   try {
@@ -63,13 +65,14 @@ export const TUNABLES: Tunables = {
   inactivityTimeoutMs: loaded.inactivityTimeoutMs,
 };
 
-// Fire-and-forget refresh for contexts that can afford network (the wrapper at
-// session start). Skips when the cache is fresh; failures leave the cache as
-// is. New values apply to the NEXT process, never mid-session.
-export async function refreshTunables(): Promise<void> {
+// Skips when the cache is fresh; failures leave the cache as is. New values
+// apply to the NEXT process, never mid-session. The wrapper fires and forgets
+// because it outlives the request; a hook process exits immediately, so it
+// awaits this with a budget small enough to sit inside the editor's timeout.
+export async function refreshTunables(timeoutMs = 3000): Promise<void> {
   if (loaded.fetchedAt && Date.now() - Date.parse(loaded.fetchedAt) < STALE_AFTER_MS) return;
   try {
-    const fetched = await request<Partial<Tunables>>('/config', { timeoutMs: 3000 });
+    const fetched = await request<Partial<Tunables>>('/config', { timeoutMs });
     ensureVibeDir();
     writeFileSync(CACHE_PATH, JSON.stringify({
       pollIntervalMs: clamp('pollIntervalMs', fetched.pollIntervalMs),
