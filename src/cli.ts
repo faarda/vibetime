@@ -58,7 +58,7 @@ async function runInit(): Promise<void> {
 
 async function showStatus(): Promise<void> {
   await refreshAndReap();
-  await flushPendingSubmissions(8000).catch(() => {});
+  await flushPendingSubmissions(1500).catch(() => {});
   const sessions = getSessions();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -143,7 +143,7 @@ program
   .description('full session history')
   .action(async () => {
     await refreshAndReap();
-    await flushPendingSubmissions(8000).catch(() => {});
+    await flushPendingSubmissions(1500).catch(() => {});
     const sessions = getSessions();
     const recent = sessions.slice(-20).reverse();
     console.log(renderLog(recent, sessions));
@@ -155,7 +155,7 @@ program
   .option('--html', 'skip terminal card, open HTML directly')
   .action(async (opts: { html?: boolean }) => {
     await refreshAndReap();
-    await flushPendingSubmissions(8000).catch(() => {});
+    await flushPendingSubmissions(1500).catch(() => {});
     const sessions = getSessions();
 
     if (opts.html) {
@@ -220,7 +220,7 @@ program
   .description('ships, this week')
   .action(async () => {
     await refreshAndReap();
-    await flushPendingSubmissions(8000).catch(() => {});
+    await flushPendingSubmissions(1500).catch(() => {});
     try {
       const data = await fetchLeaderboard();
       const auth = readAuth();

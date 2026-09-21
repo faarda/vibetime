@@ -179,9 +179,55 @@ test('a shipped hook session that idles out stays shipped, not interrupted', asy
 
   await reapOrphanedSessions();
   const s = find(id);
-  assert.equal(s.exitCode, 0);
   assert.equal(s.momentum, 'shipped');
-  assert.equal(s.hadCleanEnd, true);
+  // Reaped, not cleanly ended: the editor never said the session was over, so
+  // the mark stays and revival stays unbounded.
+  assert.equal(s.exitCode, 1);
+  assert.ok(s.reapedAt);
+  assert.equal(s.hadCleanEnd, undefined);
+});
+
+test('a reaped session with nothing to show is still interrupted', async (t) => {
+  freshDb();
+  const repo = initRepo(scratch(t), 'repo');
+  const id = randomUUID();
+
+  await hook('session-start', id, repo);
+  await updateSession(id, { lastActivityAt: new Date(Date.now() - 31 * 60_000).toISOString() });
+
+  await reapOrphanedSessions();
+  assert.equal(find(id).momentum, 'interrupted');
+});
+
+// Marking a reaped ship as a clean end caps its revival at 30 minutes, which
+// is issue #19: come back to the window two hours later and everything after
+// is dropped. Keeping the reap mark is what buys the unbounded revival.
+test('a reaped ship still revives hours later', async (t) => {
+  freshDb();
+  const repo = initRepo(scratch(t), 'repo');
+  const id = randomUUID();
+
+  await hook('session-start', id, repo);
+  writeFileSync(join(repo, 'f.txt'), 'one\n');
+  sh('git add f.txt', repo);
+  commit(repo, 'work');
+  await hook('activity', id, repo);
+
+  await updateSession(id, {
+    lastActivityAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
+    momentum: 'shipped', commits: 1, linesAdded: 51, filesTouched: 1,
+  });
+  await reapOrphanedSessions();
+
+  const reaped = find(id);
+  assert.equal(reaped.momentum, 'shipped');
+  // Ended two and a half hours ago: far outside the clean-end revival window.
+  assert.ok(Date.now() - Date.parse(reaped.endedAt) > 2 * 60 * 60_000);
+
+  await hook('activity', id, repo);
+  const revived = find(id);
+  assert.equal(revived.exitCode, -1, 'a reaped session must revive at any distance');
+  assert.equal(revived.reapedAt, undefined, 'the reap mark is cleared on revival');
 });
 
 test('addSession is a no-op when the id already exists', async (t) => {

@@ -1,8 +1,8 @@
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, renameSync, mkdirSync, rmdirSync, unlinkSync, statSync, existsSync } from 'node:fs';
-import { VIBE_DIR, ensureVibeDir } from './config.js';
+import { VIBE_DIR, ensureVibeDir, readConfig } from './config.js';
 import { TUNABLES } from './remote-config.js';
-import type { MomentumTier } from './score.js';
+import { scoreReaped, type MomentumTier } from './score.js';
 import type { RepoBaseline } from './git.js';
 
 export interface Session {
@@ -38,6 +38,13 @@ export interface Session {
   // if it then goes idle, the reaper re-finalizes it as the clean end it already
   // had instead of downgrading it to `interrupted`.
   hadCleanEnd?: boolean;
+  // Set when the reaper ended this session instead of the editor doing it. The
+  // exit code alone cannot say so, and momentum no longer can either now that a
+  // reaped session keeps the tier its work earned. Revival reads this: a reaped
+  // session can come back at any distance, because the user never closed it.
+  // Sessions reaped by a CLI before this field existed carry `interrupted`
+  // instead, which hook.ts still honours.
+  reapedAt?: string;
   // UTC days this session shipped on (one leaderboard point each), and the
   // stats snapshot at the last emitted event. Maintained by trackShipEvents in
   // score.ts; a multi-day session earns each day's event with that day's work.
@@ -194,15 +201,15 @@ export async function reapOrphanedSessions(): Promise<void> {
       // so the rescore grace window still covers work committed just after.
       s.durationSeconds += Math.round(INACTIVITY_TIMEOUT_MS / 1000);
       s.endedAt = new Date(lastMs + INACTIVITY_TIMEOUT_MS).toISOString();
-      if (s.hadCleanEnd || s.momentum === 'shipped' || s.momentum === 'progressed') {
-        // Cursor often never fires sessionEnd when the window closes. Idle-out
-        // still means the work happened — don't downgrade a shipped session.
-        // hadCleanEnd covers the Claude/Codex revival path as before.
+      if (s.hadCleanEnd) {
+        // Revived after a clean end (see hook.ts): idling out again is not an
+        // interruption — re-finalize as the clean end it already had, keeping
+        // the momentum scored against live stats.
         s.exitCode = 0;
-        if (!s.hadCleanEnd) s.hadCleanEnd = true;
       } else {
         s.exitCode = 1;
-        s.momentum = 'interrupted';
+        s.reapedAt = s.endedAt;
+        s.momentum = scoreReaped(s, readConfig());
       }
       changed = true;
     }
