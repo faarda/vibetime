@@ -76,9 +76,12 @@ export async function submitInProgress(session: Session, budgetMs = 1500): Promi
   }
 }
 
-function uniquePending(sessions: Session[]): Session[] {
+// Deduped by id: parallel hook processes could both pass the existence check
+// and write the same session twice, and a flush would then upload the empty
+// copy over the real one. More commits wins, longer session breaks the tie.
+function pendingSessions(): Session[] {
   const byId = new Map<string, Session>();
-  for (const s of sessions) {
+  for (const s of getSessions()) {
     if (s.submittedAt || s.exitCode === -1 || s.durationSeconds < 60) continue;
     const prev = byId.get(s.id);
     if (!prev || s.commits > prev.commits || (s.commits === prev.commits && s.durationSeconds > prev.durationSeconds)) {
@@ -86,6 +89,18 @@ function uniquePending(sessions: Session[]): Session[] {
     }
   }
   return [...byId.values()];
+}
+
+// What `vibe status` reports as waiting. It shares pendingSessions with the
+// flush deliberately: two copies of the rule would drift, and the count would
+// then name work the flush was never going to send.
+//
+// The login gate is the same one the flush returns on. Without it a local-only
+// user, who has no account by design, is told every session they ever ran is
+// stuck and pointed at a command that cannot clear it.
+export function pendingSubmissionCount(): number {
+  if (!readAuth()) return 0;
+  return pendingSessions().length;
 }
 
 export async function flushPendingSubmissions(budgetMs: number): Promise<void> {
@@ -96,8 +111,7 @@ export async function flushPendingSubmissions(budgetMs: number): Promise<void> {
   let auth: AuthRecord | null = await currentAuth(budgetMs);
   if (!auth) return;
 
-  const pending = uniquePending(getSessions())
-    .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  const pending = pendingSessions().sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 
   let renewedOnce = false;
   for (let i = 0; i < pending.length; i++) {
